@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Project file for tiny launcher.
+    - ApplicationIcon can be overridden on the dotnet publish /msbuild command line using /p:ApplicationIcon="..."
+    - AssemblyName can be overridden to produce different exe filenames (e.g. tiny-launcher-new, tiny-launcher-current).
+    - AssemblyTitle, FileVersion, Product can also be overridden via /p:... on the command line.
+    - UseAppHost true ensures a native apphost exe is produced (so Windows picks up the embedded icon).
+    - PublishSingleFile true optionally bundles runtime into a single file (adjust as desired).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+
+    <!-- Runtime identifier for Windows x64. Change to win-x86 if needed. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- Force creation of an exe apphost so the icon resource is visible to Windows. -->
+    <UseAppHost>true</UseAppHost>
+
+    <!-- Default to single-file publish for convenient distribution; optional. -->
+    <PublishSingleFile>true</PublishSingleFile>
+
+    <!-- Default application icon (overrideable on CLI). Keep a sane default in repo. -->
+    <ApplicationIcon>Logos\new-session.ico</ApplicationIcon>
+
+    <!-- Default assembly metadata (overrideable on CLI). -->
+    <AssemblyTitle>TinyLauncher</AssemblyTitle>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Product>TinyLauncher</Product>
+
+    <!-- Ensure assembly info is generated from the project properties so overrides take effect. -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include icon files so they are available at publish time -->
+    <None Include="Logos\new-session.ico" Pack="true" />
+    <None Include="Logos\current-session.ico" Pack="true" />
+  </ItemGroup>
+
+</Project>
+

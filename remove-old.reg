@@ -1,0 +1,45 @@
+Windows Registry Editor Version 5.00
+
+; Altlasten unter HKCU entfernen
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_nvr]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_new_hidden]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_Debug]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_new]
+[-HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_current]
+
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_nvr]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_new_hidden]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_Debug]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_new]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_current]
+
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_nvr]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_new_hidden]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_Debug]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_new]
+[-HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_current]
+
+; Altlasten unter HKLM entfernen (falls vorhanden)
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim]
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim_nvr]
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim_new_hidden]
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim_Debug]
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim_new]
+[-HKEY_LOCAL_MACHINE\Software\Classes\*\shell\Open_in_Neovim_current]
+
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim_nvr]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim_new_hidden]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim_Debug]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim_new]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\shell\Open_in_Neovim_current]
+
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim_nvr]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim_new_hidden]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim_Debug]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim_new]
+[-HKEY_LOCAL_MACHINE\Software\Classes\Directory\Background\shell\Open_in_Neovim_current]

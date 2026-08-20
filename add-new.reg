@@ -1,0 +1,19 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_new]
+@="Open with Neovim (new instance)"
+"Icon"="C:\\Program Files\\Neovim\\bin\\nvim.exe"
+[HKEY_CURRENT_USER\Software\Classes\*\shell\Open_in_Neovim_new\command]
+@="wscript.exe //nologo \"C:\\tools\\OpenInNvim\\open-in-nvim.vbs\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_new]
+@="Open with Neovim (new instance)"
+"Icon"="C:\\Program Files\\Neovim\\bin\\nvim.exe"
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\Open_in_Neovim_new\command]
+@="wscript.exe //nologo \"C:\\tools\\OpenInNvim\\open-in-nvim.vbs\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_new]
+@="Open with Neovim (new instance)"
+"Icon"="C:\\Program Files\\Neovim\\bin\\nvim.exe"
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\Open_in_Neovim_new\command]
+@="wscript.exe //nologo \"C:\\tools\\OpenInNvim\\open-in-nvim.vbs\" \"%V\""
