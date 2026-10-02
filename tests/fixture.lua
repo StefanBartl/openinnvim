@@ -36,11 +36,14 @@ local function spawn(label, args, attach_ui, setup_lua)
 end
 
 -- gui1 has no :Filetree (directory falls back to cd + edit); gui2 gets a stand-in that records its
--- arguments in g:ft_args, so the tests can see what the launcher asked filetree.nvim to do.
+-- argument list in g:ft_args, so the tests can see what the launcher asked filetree.nvim to do.
+local filetree_stub = [[
+vim.api.nvim_create_user_command("Filetree", function(o)
+	vim.g.ft_args = o.fargs
+end, { nargs = "*" })
+]]
 spawn("gui1", { "--clean", "--embed" }, true)
-spawn("gui2", { "--clean", "--embed" }, true, [[
-vim.api.nvim_create_user_command("Filetree", function(o) vim.g.ft_args = o.args end, { nargs = "*" })
-]])
+spawn("gui2", { "--clean", "--embed" }, true, filetree_stub)
 spawn("headless", { "--clean", "--headless" })
 spawn("embedhl", { "--clean", "--embed", "--headless", "-n", "-u", "NONE" })
 

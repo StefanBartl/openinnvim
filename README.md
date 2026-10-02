@@ -39,6 +39,7 @@ C:\tools\OpenInNvim\
   open-in-nvim-current.vbs
   open-in-nvim-current.ps1
   open-in-nvim.config.ps1
+  open-in-nvim.lib.ps1        (gemeinsame Helfer, Pflicht für beide Launcher)
   install-context.ps1
   remove-old.reg
   verify.ps1
@@ -86,11 +87,20 @@ Open with Neovim (current instance)
   1. NVIM_SERVER (falls gesetzt)
   2. fester Pipe-Name \\.\pipe\nvim-%USERNAME% (falls vorhanden und PREFER_STABLE_PIPE nicht $false)
   3. alle laufenden Instanzen über ihre Standard-Pipe \\.\pipe\nvim.<pid>.<n> (gibt es in jeder Neovim-Sitzung ohne
-     Konfiguration; `--headless`-Hilfsprozesse und `-l`-Skripte werden ausgefiltert), sortiert nach INSTANCE_PICK
-     (newest/oldest/ask)
-  4. nvr --serverlist (nur als letzte Möglichkeit, nvr hängt unter Windows an Pipes)
-- Wenn erreichbar: An die Instanz per nvim --server <pipe> --remote / --remote-send anbinden (jeder Aufruf mit Zeitlimit).
-- Wenn nicht erreichbar: Neue Instanz mit --listen <Adresse> starten und Ziel öffnen.
+     Konfiguration), sortiert nach INSTANCE_PICK (newest/oldest/ask). Es zählen nur Instanzen **mit angedocktem UI**
+     (`len(nvim_list_uis()) > 0`): `--headless`-Hilfsprozesse, `-l`-Skripte und neotests Kindprozess haben keins. Das ist
+     genauer und etwa 200 ms schneller als eine WMI-Abfrage der Kommandozeilen. Nur Instanzen der eigenen
+     Windows-Sitzung (nicht die eines anderen angemeldeten Benutzers).
+  4. nvr --serverlist (nur wenn nichts oben das Ziel genommen hat; nvr ist ein Python-Skript, startet langsam und
+     hängt unter Windows an Pipes, deshalb mit Zeitlimit)
+- Wenn erreichbar: Die Datei bzw. der Ordner wird **per RPC über die Pipe** übergeben (`:drop`, wie `nvim --remote`;
+  Ordner an `:Filetree open` bzw. cd + `:edit .`). Der Pfad geht als Parameter in ein kleines Lua-Stück und wird nie in
+  Befehlstext gesteckt, deshalb brauchen Leerzeichen, `#`, `%`, `[`, `'` oder `&` im Namen keine Sonderbehandlung. Es
+  startet kein zweites nvim.exe (das kostete etwa eine Sekunde), und eine Ablehnung kommt als Fehlermeldung zurück.
+  Nur für Adressen, die kein Pipe-Name sind (TCP), gilt der Rückweg über `nvim --server … --remote/--remote-send`
+  (jeder Aufruf mit Zeitlimit).
+- Wenn nicht erreichbar: Neue Instanz mit --listen <Adresse> starten (nur wenn der Pipe-Name nicht schon belegt ist)
+  und Ziel öffnen.
 - Unter Windows besteht eine Terminal-Sitzung aus zwei Prozessen (sichtbares nvim.exe und dessen `--embed`-Kern); die Pipe
   gehört dem Kern, deshalb wird nach Pipes gesucht und nicht nach der PID des Fensters.
 
@@ -128,7 +138,14 @@ Die Tests starten eigene Wegwerf-Instanzen und berühren nie eine laufende Sitzu
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
 ```
 
-Diagnose ohne etwas zu öffnen: `OPEN_IN_NVIM_DRYRUN=1` gibt die geordnete Kandidatenliste aus.
+Diagnose-Schalter (Umgebungsvariablen, nur für Tests und Fehlersuche):
+
+| Variable | Wirkung |
+| --- | --- |
+| `OPEN_IN_NVIM_DRYRUN=1` | gibt die geordnete Kandidatenliste aus, öffnet nichts |
+| `OPEN_IN_NVIM_SPAWN_DRYRUN=1` | gibt den Befehl aus, der eine neue Instanz starten würde, startet nichts |
+| `OPEN_IN_NVIM_NO_SPAWN=1` | startet nie ein Fenster; findet sich keine Instanz, Exit-Code 3 |
+| `OPEN_IN_NVIM_ONLY_PIDS=<pid,pid>` | nur diese Prozesse (ohne nvr und festen Pipe-Namen) |
 
 ## Deinstallation
 
@@ -147,6 +164,9 @@ Diagnose ohne etwas zu öffnen: `OPEN_IN_NVIM_DRYRUN=1` gibt die geordnete Kandi
   den Befehl kennt; sonst (oder mit `FOLDER_OPENS_IN = 'edit'`) wird cd + Verzeichnisansicht (`:edit .`) benutzt.
 - Alle Befehle, die „current“ in die Sitzung schickt, laufen mit `:silent`: `:cd` gibt den Pfad aus, und ein Pfad, der
   breiter als das Fenster ist, würde einen Hit-Enter-Prompt auslösen und die Instanz blockieren.
+- Windows PowerShell 5.1: ein deklarierter Funktionsparameter `$args` wird **nicht** gebunden (bleibt leer). Die
+  Launcher nennen ihn deshalb `$launchArgs`/`$nvimArgs`; ein leeres Element in `Start-Process -ArgumentList` wirft
+  außerdem einen Validierungsfehler (der `cmd start`-Rückweg übergibt den Fenstertitel deshalb als `""`).
 - Die Implementierung ist PS 5.1 kompatibel (keine ?. oder ?: Operatoren), Single-Responsibility und mit robuster Argument-Quotierung umgesetzt.
 
 ---

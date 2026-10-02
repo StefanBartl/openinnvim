@@ -19,7 +19,7 @@ $Cfg = [ordered]@{
   PREFER_STABLE_PIPE = $true
 
   # Welche laufende Instanz zuerst probiert wird, wenn mehrere da sind (jede Neovim-Sitzung hat ohne
-  # Konfiguration eine Pipe \\.\pipe\nvim.<pid>.<n>; --headless-Hilfsprozesse werden ignoriert):
+  # Konfiguration eine Pipe \\.\pipe\nvim.<pid>.<n>; Instanzen ohne angedocktes UI, also --headless-Hilfsprozesse, werden ignoriert):
   #   'newest' = zuletzt gestartete (Standard), 'oldest' = am längsten laufende,
   #   'ask'    = Auswahlfenster mit Arbeitsverzeichnis und Datei jeder Instanz.
   INSTANCE_PICK = 'newest'

@@ -39,6 +39,14 @@ if (Test-Path -LiteralPath $CfgPath) {
   }
 }
 
+# Shared helpers (command-line quoting, detached spawn).
+$LibPath = Join-Path -Path $Here -ChildPath 'open-in-nvim.lib.ps1'
+if (-not (Test-Path -LiteralPath $LibPath)) {
+  Write-Error "open-in-nvim.lib.ps1 is missing next to this script: $LibPath"
+  exit 1
+}
+. $LibPath
+
 # ---------------------------
 # 3) Helpers
 # ---------------------------
@@ -89,7 +97,12 @@ if (-not $NVIM) {
 # 5) Determine target from $args (Explorer forwards %1 or %V via VBS)
 # ---------------------------
 $TargetPath = if ($args.Count -gt 0) { $args[0] } else { $PWD.Path }
-$Expanded   = [Environment]::ExpandEnvironmentVariables($TargetPath).Trim('"')
+# Explorer hands over a real path, which may legitimately contain "%NAME%" (a folder called %TEMP%):
+# environment variables are only expanded when the path as given does not exist.
+$Expanded   = $TargetPath.Trim('"')
+if (-not (Test-Path -LiteralPath $Expanded)) {
+  $Expanded = [Environment]::ExpandEnvironmentVariables($Expanded)
+}
 
 $Cwd     = $PWD.Path
 $FileArg = $null
@@ -119,51 +132,54 @@ if ($FileArg) { $nvimArgs += @('--', $FileArg) }
 # ---------------------------
 # 6) Launch strategies (WezTerm -> Windows Terminal -> plain cmd.exe start)
 # ---------------------------
+# All three start the terminal detached through Invoke-Spawn (lib): the arguments are quoted correctly
+# (a folder "My Dir" or a drive root "C:\" survives) and the hidden PowerShell does not keep waiting
+# until the terminal is closed, which "& wezterm ... | Out-Null" did.
+# The parameter is called $launchArgs, not $args: in Windows PowerShell 5.1 a declared parameter named
+# $args does not bind, the automatic variable stays empty and the file argument was silently lost.
 function Start-With-WezTerm {
-  param([string]$cwd, [string[]]$args)
+  param([string]$cwd, [string[]]$launchArgs)
+  $wez = $null
   $wezPref = $Cfg.WEZTERM_BIN
   if ($wezPref -and (Test-Path -LiteralPath $wezPref)) {
-    & $wezPref start --cwd $cwd -- $NVIM @args | Out-Null
-    return $true
+    $wez = $wezPref
+  } else {
+    $wezCmd = Get-Command -Name 'wezterm' -ErrorAction SilentlyContinue
+    if ($wezCmd) { $wez = $wezCmd.Source }
   }
-  $wezCmd = Get-Command -Name 'wezterm' -ErrorAction SilentlyContinue
-  if ($wezCmd) {
-    wezterm start --cwd $cwd -- $NVIM @args | Out-Null
-    return $true
-  }
-  return $false
+  if (-not $wez) { return $false }
+  Invoke-Spawn -FilePath $wez -ArgList (@('start', '--cwd', $cwd, '--', $NVIM) + $launchArgs)
+  return $true
 }
 
 function Start-With-WindowsTerminal {
-  param([string]$cwd, [string[]]$args)
+  param([string]$cwd, [string[]]$launchArgs)
   $wtCmd = Get-Command -Name 'wt' -ErrorAction SilentlyContinue
-  if ($wtCmd) {
-    $wt = $wtCmd.Source
-    # Open a new tab (-w 0 nt), set working directory (-d), then run nvim
-    $wtArgs = @('-w','0','nt','-d', $cwd, '--', $NVIM) + $args
-    Start-Process -FilePath $wt -ArgumentList $wtArgs | Out-Null
-    return $true
-  }
-  return $false
+  if (-not $wtCmd) { return $false }
+  # Open a new tab (-w 0 nt), set working directory (-d), then run nvim
+  Invoke-Spawn -FilePath $wtCmd.Source -ArgList (@('-w', '0', 'nt', '-d', $cwd, '--', $NVIM) + $launchArgs)
+  return $true
 }
 
 function Start-With-CmdStart {
-  param([string]$cwd, [string[]]$args)
+  param([string]$cwd, [string[]]$launchArgs)
   # Fallback: detached console via cmd.exe "start"
   $quotedCwd = Quote-Arg $cwd
   $cmdline   = Quote-Arg $NVIM
-  if ($args.Count -gt 0) {
-    $qa = @(); foreach ($a in $args) { $qa += (Quote-Arg $a) }
+  if ($launchArgs.Count -gt 0) {
+    $qa = @(); foreach ($a in $launchArgs) { $qa += (Quote-Arg $a) }
     $cmdline += ' ' + ($qa -join ' ')
   }
-  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','start','','/D', $quotedCwd, $cmdline) | Out-Null
+  # '""' is the (empty) window title: "start" takes the first quoted argument for the title, and an
+  # empty array element is rejected by Windows PowerShell 5.1 ("argument is null or empty").
+  Invoke-Spawn -FilePath 'cmd.exe' -Raw -ArgList @('/c', 'start', '""', '/D', $quotedCwd, $cmdline)
   return $true
 }
 
 # ---------------------------
 # 7) Try in order and exit
 # ---------------------------
-if (Start-With-WezTerm -cwd $Cwd -args $nvimArgs) { exit 0 }
-if (Start-With-WindowsTerminal -cwd $Cwd -args $nvimArgs) { exit 0 }
-[void](Start-With-CmdStart -cwd $Cwd -args $nvimArgs)
+if (Start-With-WezTerm -cwd $Cwd -launchArgs $nvimArgs) { exit 0 }
+if (Start-With-WindowsTerminal -cwd $Cwd -launchArgs $nvimArgs) { exit 0 }
+[void](Start-With-CmdStart -cwd $Cwd -launchArgs $nvimArgs)
 exit 0

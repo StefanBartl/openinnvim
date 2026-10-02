@@ -25,15 +25,6 @@ function Assert-That {
 }
 
 # ---------------------------------------------------------------------------------------------
-Write-Host '== unit: command-line eligibility'
-Assert-That 'plain TUI'                  (Test-NvimCommandLineEligible '"C:\Program Files\Neovim\bin\nvim.exe" file.txt')
-Assert-That 'GUI (--embed only)'         (Test-NvimCommandLineEligible 'nvim.exe --embed')
-Assert-That '--listen is not -l'         (Test-NvimCommandLineEligible 'nvim.exe --listen \\.\pipe\nvim-x')
-Assert-That '--headless excluded'        (-not (Test-NvimCommandLineEligible 'nvim.exe --headless -c q'))
-Assert-That '--embed --headless excluded'(-not (Test-NvimCommandLineEligible 'nvim.exe --embed --headless -n -u NONE'))
-Assert-That '-l script excluded'         (-not (Test-NvimCommandLineEligible 'nvim.exe -l probe.lua'))
-Assert-That 'unknown command line kept'  (Test-NvimCommandLineEligible '')
-
 Write-Host '== unit: msgpack decoder'
 function Dec { param([byte[]]$b) $p = 0; return ConvertFrom-MsgPackValue -Buf $b -Pos ([ref]$p) }
 $r = Dec ([byte[]](0x94, 0x01, 0x01, 0xc0, 0xa3, 0x61, 0x62, 0x63))
@@ -48,9 +39,50 @@ try { [void](Dec ([byte[]](0xa5, 0x61))) } catch { $threw = ($_.Exception.Messag
 Assert-That 'truncated string reports incomplete' $threw
 $utf = [Text.Encoding]::UTF8.GetBytes([string]([char]0x00e4 + [char]0x00fc))
 Assert-That 'UTF-8 string' ((Dec ([byte[]](@(0xa4) + $utf))) -eq ([string]([char]0x00e4 + [char]0x00fc)))
+$one = Dec ([byte[]](0x91, 0xa1, 0x78))
+Assert-That 'one-element array stays an array' (($one -is [array]) -and $one.Count -eq 1 -and $one[0] -eq 'x')
+$empty = Dec ([byte[]](0x90))
+Assert-That 'empty array stays an array, not $null' (($null -ne $empty) -and ($empty -is [array]) -and $empty.Count -eq 0)
+$deep = [byte[]](@(0x91) * 40 + @(0xc0))
+$threw = $false
+try { [void](Dec $deep) } catch { $threw = ($_.Exception.Message -match 'too deep') }
+Assert-That 'absurdly nested reply is rejected, not recursed into' $threw
+
+Write-Host '== unit: msgpack encoder'
+function RoundTrip { param($Value) $b = [byte[]](ConvertTo-MsgPackValue $Value); $p = 0; return ,(ConvertFrom-MsgPackValue -Buf $b -Pos ([ref]$p)) }
+$rt = RoundTrip ([object[]]@('a', [object[]]@('b', 'c'), $true, $false, $null, 5))
+Assert-That 'nested array round trip' (($rt[0] -eq 'a') -and ($rt[1].Count -eq 2) -and ($rt[1][1] -eq 'c') -and ($rt[2] -eq $true) -and ($rt[3] -eq $false) -and ($null -eq $rt[4]) -and ($rt[5] -eq 5)) ("got=" + ($rt -join ','))
+$longStr = ('p' * 300)
+Assert-That 'str16 (300 chars) round trip' ((RoundTrip $longStr) -eq $longStr)
+$weirdName = "My Dir (1) #2 [x] 'q' %p & more"
+Assert-That 'special characters survive the encoder' ((RoundTrip $weirdName) -eq $weirdName)
+
+Write-Host '== unit: command-line quoting (checked against CommandLineToArgvW)'
+Add-Type -Namespace OinTest -Name Argv -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("shell32.dll", SetLastError = true)]
+public static extern System.IntPtr CommandLineToArgvW([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string lpCmdLine, out int pNumArgs);
+'@
+function Split-Argv {
+  param([string]$Line)
+  $n = 0
+  $ptr = [OinTest.Argv]::CommandLineToArgvW($Line, [ref]$n)
+  $out = @()
+  for ($i = 0; $i -lt $n; $i++) {
+    $sp = [System.Runtime.InteropServices.Marshal]::ReadIntPtr($ptr, $i * [IntPtr]::Size)
+    $out += [System.Runtime.InteropServices.Marshal]::PtrToStringUni($sp)
+  }
+  return ,$out
+}
+$samples = @('C:\dir\', 'C:\a b\', 'plain', 'with space', 'say "hi"', '\\server\share dir\', 'end\\', 'a\"b', "it's")
+foreach ($smp in $samples) {
+  $line = 'prog.exe ' + (ConvertTo-CommandLineArg $smp) + ' tail'
+  $argv = Split-Argv $line
+  Assert-That ("quoting round trip: [$smp]") (($argv.Count -eq 3) -and ($argv[1] -eq $smp) -and ($argv[2] -eq 'tail')) ("argv=" + ($argv -join ' | '))
+}
 
 # ---------------------------------------------------------------------------------------------
 Write-Host '== fixture: starting throw-away instances'
+$runStart = (Get-Date).AddSeconds(-2)
 $tmp = Join-Path $env:TEMP ('oin_tests_' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force $tmp | Out-Null
 $pidsFile = Join-Path $tmp 'pids.txt'
@@ -90,7 +122,11 @@ try {
   Assert-That 'finds exactly the two editor instances' (($got -join ',') -eq ($want -join ',')) ("got=" + ($got -join ',') + " want=" + ($want -join ','))
   Assert-That 'pipe name format'                     (($inst | Where-Object { $_.Pipe -match '^\\\\\.\\pipe\\nvim\.\d+\.\d+$' }).Count -eq $inst.Count)
   Assert-That 'start time known'                     (($inst | Where-Object { $_.Started }).Count -eq $inst.Count)
-  Assert-That 'headless and embed-headless filtered' ((@($inst | Where-Object { $_.Pid -eq $P.headless -or $_.Pid -eq $P.embedhl })).Count -eq 0)
+  Assert-That 'headless and embed-headless (no UI) filtered' ((@($inst | Where-Object { $_.Pid -eq $P.headless -or $_.Pid -eq $P.embedhl })).Count -eq 0)
+  Assert-That 'the headless helper does own a pipe (so the filter is what excludes it)' ((@(Get-NvimPipeEntries | Where-Object { $_.Pid -eq $P.headless })).Count -ge 1)
+  $uiHeadless = Invoke-NvimEval -Pipe ('\\.\pipe\nvim.' + $P.headless + '.0') -Expr 'len(nvim_list_uis())'
+  $uiGui = Invoke-NvimEval -Pipe ('\\.\pipe\nvim.' + $P.gui1 + '.0') -Expr 'len(nvim_list_uis())'
+  Assert-That 'UI count is what separates them' (($uiHeadless -eq 0) -and ($uiGui -ge 1)) "headless=[$uiHeadless] gui=[$uiGui]"
   $newest = @(Select-NvimInstance -Instances $inst -Pick 'newest')
   $oldest = @(Select-NvimInstance -Instances $inst -Pick 'oldest')
   Assert-That 'newest first' ($newest[0].Pid -eq $P.tui2) ("first=" + $newest[0].Pid)
@@ -130,18 +166,20 @@ try {
   Set-Content -LiteralPath $targetFile -Value 'hello'
 
   function Invoke-Launcher {
-    param([hashtable]$Env, [string]$Target)
+    param([hashtable]$Env, [string]$Target, [string]$Script = $launcher)
     $saved = @{}
     foreach ($k in $Env.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Env[$k]) }
     try {
-      $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher $Target 2>&1
+      $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script $Target 2>&1
       return @{ Out = @($out); Code = $LASTEXITCODE }
     } finally {
       foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
     }
   }
 
-  $base = @{ OPEN_IN_NVIM_ONLY_PIDS = (($P.tui1, $P.tui2) -join ','); USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_DRYRUN = '1' }
+  # OPEN_IN_NVIM_NO_SPAWN: if discovery ever failed, the launcher must report it instead of opening a
+  # real terminal window with a new Neovim.
+  $base = @{ OPEN_IN_NVIM_ONLY_PIDS = (($P.tui1, $P.tui2) -join ','); USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_DRYRUN = '1'; OPEN_IN_NVIM_NO_SPAWN = '1' }
   $r = Invoke-Launcher -Env $base -Target $targetFile
   $cands = @($r.Out | Where-Object { "$_" -like 'candidate:*' } | ForEach-Object { "$_" -replace '^candidate:\s*', '' })
   Assert-That 'dry run exits 0'                       ($r.Code -eq 0) "code=$($r.Code) out=$($r.Out -join ' / ')"
@@ -156,10 +194,12 @@ try {
 
   # -------------------------------------------------------------------------------------------
   Write-Host '== launcher script (real open into the newest throw-away instance)'
-  $noDry = @{ OPEN_IN_NVIM_ONLY_PIDS = (($P.tui1, $P.tui2) -join ','); USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_DRYRUN = $null }
+  $noDry = @{ OPEN_IN_NVIM_ONLY_PIDS = (($P.tui1, $P.tui2) -join ','); USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_DRYRUN = $null; OPEN_IN_NVIM_NO_SPAWN = '1' }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
   $r3 = Invoke-Launcher -Env $noDry -Target $targetFile
+  $openMs = $sw.ElapsedMilliseconds
   Assert-That 'launcher exits 0' ($r3.Code -eq 0) "code=$($r3.Code) out=$($r3.Out -join ' / ')"
-  Start-Sleep -Milliseconds 800
+  Write-Host "       (launcher wall time incl. PowerShell start: $openMs ms)"
   $e2 = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'join(map(getbufinfo({"buflisted": 1}), "v:val.name"), "|")'
   $e1 = Invoke-NvimEval -Pipe $newest[1].Pipe -Expr 'join(map(getbufinfo({"buflisted": 1}), "v:val.name"), "|")'
   Assert-That 'file (with a space) opened in the newest instance' (($e2 -is [string]) -and ($e2 -like "*target file.txt*")) "buffers=[$e2]"
@@ -169,26 +209,90 @@ try {
   $dir = Join-Path $tmp 'sub dir'; New-Item -ItemType Directory -Force $dir | Out-Null
   # Newest instance (gui2) has a :Filetree stand-in: a folder must go there, not into cd + edit.
   $r4 = Invoke-Launcher -Env $noDry -Target $dir
-  Start-Sleep -Milliseconds 800
-  $ft = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", "")'
+  $ft = @(Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", [])')
   Assert-That 'launcher exits 0 for directory' ($r4.Code -eq 0) "code=$($r4.Code)"
-  Assert-That 'folder is handed to :Filetree open (path with a space intact)' (($ft -is [string]) -and ($ft -match '^open ') -and (($ft -replace '\\ ', ' ') -like "*$dir")) "g:ft_args=[$ft]"
+  Assert-That 'folder is handed to :Filetree open as one argument (space intact)' (($ft.Count -eq 2) -and ($ft[0] -eq 'open') -and ($ft[1] -eq $dir)) "g:ft_args=[$($ft -join ' | ')]"
   $cwdFt = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()'
   Assert-That 'with :Filetree the cwd is left to filetree.nvim' ($cwdFt -ne $dir) "cwd=[$cwdFt]"
+
+  # Names that command-line or key parsing would mangle: #, %, [, (, ', &. The old fnameescape route
+  # failed for these without any error.
+  $weirdDir = Join-Path $tmp "My Dir (1) #2 [x] 'q' %p & more"; New-Item -ItemType Directory -Force $weirdDir | Out-Null
+  [void](Invoke-Launcher -Env $noDry -Target $weirdDir)
+  $ftw = @(Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", [])')
+  Assert-That 'folder with #, %, [, (, quote and & arrives unchanged' (($ftw.Count -eq 2) -and ($ftw[1] -eq $weirdDir)) "g:ft_args=[$($ftw -join ' | ')]"
+  $weirdFile = Join-Path $tmp "a#b%c [x] 'q' & (1).txt"; Set-Content -LiteralPath $weirdFile -Value 'x'
+  $cwdBeforeFile = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()'
+  $r6 = Invoke-Launcher -Env $noDry -Target $weirdFile
+  $e2w = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'join(map(getbufinfo({"buflisted": 1}), "v:val.name"), "|")'
+  Assert-That 'file with #, %, [, (, quote and & opens' (($r6.Code -eq 0) -and ($e2w -is [string]) -and ($e2w.Contains($weirdFile))) "code=$($r6.Code) buffers=[$e2w]"
+  Assert-That 'opening a file does not change the working directory' ((Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()') -eq $cwdBeforeFile)
 
   # Older instance (gui1) has no :Filetree: fall back to cd + directory view.
   $envNoFt = $noDry.Clone(); $envNoFt['OPEN_IN_NVIM_ONLY_PIDS'] = "$($P.tui1)"
   $r4b = Invoke-Launcher -Env $envNoFt -Target $dir
-  Start-Sleep -Milliseconds 800
   $cwd = Invoke-NvimEval -Pipe $newest[1].Pipe -Expr 'getcwd()'
   Assert-That 'without :Filetree the directory open changes cwd' ($cwd -eq $dir) "cwd=[$cwd] want=[$dir]"
   Assert-That 'launcher exits 0 for directory (fallback)' ($r4b.Code -eq 0) "code=$($r4b.Code)"
+  [void](Invoke-Launcher -Env $envNoFt -Target $weirdDir)
+  $cwdW = Invoke-NvimEval -Pipe $newest[1].Pipe -Expr 'getcwd()'
+  Assert-That 'cd + directory view works for the special-character folder' ($cwdW -eq $weirdDir) "cwd=[$cwdW]"
+
+  # FOLDER_OPENS_IN lives in the config file, so the 'edit' mode is exercised through the lib directly.
+  $viaEdit = Invoke-NvimOpen -Pipe $newest[0].Pipe -Path $dir -IsDir $true -FolderMode 'edit'
+  Assert-That 'FolderMode edit skips :Filetree even when the instance has it' (($viaEdit.Ok) -and ($viaEdit.Result -eq 'edit') -and ((Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()') -eq $dir))
+
+  # A reached instance that refuses is reported, not mistaken for an unreachable one.
+  $bad = Invoke-NvimRpc -Pipe $newest[0].Pipe -Method 'nvim_exec_lua' -Params @('error("boom")', [object[]]@())
+  Assert-That 'error reply is Connected but not Ok, with the message' (($bad.Connected) -and (-not $bad.Ok) -and ("$($bad.Error)" -match 'boom')) "err=[$($bad.Error)]"
+  $none = Invoke-NvimRpc -Pipe '\\.\pipe\nvim.999999.0' -Method 'nvim_eval' -Params @('1') -TimeoutMs 300
+  Assert-That 'missing pipe is not Connected' ((-not $none.Connected) -and (-not $none.Ok))
 
   $envOlder = $noDry.Clone(); $envOlder['OPEN_IN_NVIM_ONLY_PIDS'] = "$($P.tui1)"
   $r5 = Invoke-Launcher -Env $envOlder -Target $targetFile
-  Start-Sleep -Milliseconds 800
   $e1b = Invoke-NvimEval -Pipe $newest[1].Pipe -Expr 'join(map(getbufinfo({"buflisted": 1}), "v:val.name"), "|")'
   Assert-That 'restricting to the older PID opens it there' (($e1b -is [string]) -and ($e1b -like '*target file.txt*')) "buffers=[$e1b]"
+
+  # A folder whose name looks like an environment variable is a real path, not something to expand.
+  $pctDir = Join-Path $tmp '%TEMP%x'; New-Item -ItemType Directory -Force $pctDir | Out-Null
+  [void](Invoke-Launcher -Env $noDry -Target $pctDir)
+  $ftp = @(Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", [])')
+  Assert-That 'a folder named %TEMP%x is not environment-expanded' (($ftp.Count -eq 2) -and ($ftp[1] -eq $pctDir)) "g:ft_args=[$($ftp -join ' | ')]"
+
+  # -------------------------------------------------------------------------------------------
+  Write-Host '== launcher script (no instance reachable)'
+  $envNoInst = @{ OPEN_IN_NVIM_ONLY_PIDS = '999999'; USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_DRYRUN = $null; OPEN_IN_NVIM_NO_SPAWN = '1'; OPEN_IN_NVIM_SPAWN_DRYRUN = $null }
+  $rn = Invoke-Launcher -Env $envNoInst -Target $targetFile
+  Assert-That 'safety stop: exit code 3 and no window' (($rn.Code -eq 3) -and (($rn.Out -join ' ') -match 'no reachable instance')) "code=$($rn.Code) out=$($rn.Out -join ' / ')"
+
+  # The command that would start a new Neovim (printed instead of started). Windows PowerShell 5.1 did
+  # not bind a parameter called $args, so the new instance used to get no --listen and no file.
+  $spaceDir = Join-Path $tmp 'My Dir'; New-Item -ItemType Directory -Force $spaceDir | Out-Null
+  $spaceFile = Join-Path $spaceDir 'new file.txt'; Set-Content -LiteralPath $spaceFile -Value 'x'
+  $envSpawn = $envNoInst.Clone(); $envSpawn['OPEN_IN_NVIM_NO_SPAWN'] = $null; $envSpawn['OPEN_IN_NVIM_SPAWN_DRYRUN'] = '1'
+  $rs = Invoke-Launcher -Env $envSpawn -Target $spaceFile
+  $spawn = @($rs.Out | Where-Object { "$_" -like 'spawn:*' })
+  $line = "$($spawn[0])"
+  Assert-That 'new-instance command is produced and exits 0' (($rs.Code -eq 0) -and ($spawn.Count -eq 1)) "code=$($rs.Code) out=$($rs.Out -join ' / ')"
+  Assert-That 'new instance gets --listen with the per-user pipe' ($line.Contains('"--listen" "\\.\pipe\nvim-oin_test_nobody"')) "line=$line"
+  Assert-That 'new instance gets the file after --' ($line.Contains('"--" "' + $spaceFile + '"')) "line=$line"
+  Assert-That 'working directory with a space stays one argument' ($line.Contains('"' + $spaceDir + '"')) "line=$line"
+  $rsd = Invoke-Launcher -Env $envSpawn -Target $spaceDir
+  $lined = "$(@($rsd.Out | Where-Object { "$_" -like 'spawn:*' })[0])"
+  Assert-That 'folder target: --listen but no file argument' ($lined.Contains('"--listen"') -and -not $lined.Contains('new file.txt')) "line=$lined"
+
+  # The "new instance" entry (open-in-nvim.ps1) had the same lost-$args bug: the file never reached nvim.
+  $newScript = Join-Path $Root 'open-in-nvim.ps1'
+  $envNew = @{ OPEN_IN_NVIM_SPAWN_DRYRUN = '1' }
+  $rnew = Invoke-Launcher -Env $envNew -Target $spaceFile -Script $newScript
+  $linen = "$(@($rnew.Out | Where-Object { "$_" -like 'spawn:*' })[0])"
+  Assert-That 'new-instance entry: file reaches nvim after --' (($rnew.Code -eq 0) -and $linen.Contains('"--" "' + $spaceFile + '"')) "code=$($rnew.Code) line=$linen"
+  Assert-That 'new-instance entry: folder with a space is one argument' ($linen.Contains('"' + $spaceDir + '"')) "line=$linen"
+  $rroot = Invoke-Launcher -Env $envNew -Target 'C:\' -Script $newScript
+  $liner = "$(@($rroot.Out | Where-Object { "$_" -like 'spawn:*' })[0])"
+  if ($liner -match '"--cwd"|"-d"') {
+    Assert-That 'drive root keeps its closing quote (trailing backslash doubled)' ($liner.Contains('"C:\\"')) "line=$liner"
+  }
 }
 finally {
   # Ask the fixture to stop its own children, then make sure only our own processes are gone.
@@ -197,8 +301,9 @@ finally {
   Start-Sleep -Milliseconds 500
   if ($P) {
     foreach ($id in $P.Values) {
+      # A PID can be reused once its process is gone: only touch an nvim that started during this run.
       $p = Get-Process -Id $id -ErrorAction SilentlyContinue
-      if ($p) { try { $p.Kill() } catch {} }
+      if ($p -and $p.ProcessName -eq 'nvim' -and $p.StartTime -ge $runStart) { try { $p.Kill() } catch {} }
     }
   }
   try { [IO.Directory]::Delete($tmp, $true) } catch {}

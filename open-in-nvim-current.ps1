@@ -1,7 +1,10 @@
 # open-in-nvim-current.ps1
 # Behavior:
 # - Try to open the target in an already running Neovim instance ("current").
-# - Discovery order: configured NVIM_SERVER -> (if available) `nvr --serverlist` -> default \\.\pipe\nvim-%USERNAME%
+# - Discovery order: configured NVIM_SERVER -> stable pipe \\.\pipe\nvim-%USERNAME% (if it exists) ->
+#   every running instance with a UI attached (default pipes \\.\pipe\nvim.<pid>.<n>) -> `nvr --serverlist`
+#   (only if nothing above took the target).
+# - Files and folders are handed over by RPC on the pipe; the command line (nvim --remote) is the fallback.
 # - If no server is reachable, start a NEW instance with `--listen` at a stable address and open the target.
 # Compatible with Windows PowerShell 5.1 (no CmdletBinding, no null-conditional, no ?: operator).
 
@@ -35,11 +38,14 @@ if (Test-Path -LiteralPath $CfgPath) {
   }
 }
 
-# Instance discovery helpers (default-pipe scan, chooser). Optional: without the file the script
-# falls back to nvr and the per-user pipe name below.
+# Shared helpers (instance discovery, RPC client, command-line quoting, spawning). Required: the two
+# code paths "with" and "without" the file were never both exercised, so there is only one now.
 $LibPath = Join-Path -Path $Here -ChildPath 'open-in-nvim.lib.ps1'
-$HaveLib = Test-Path -LiteralPath $LibPath
-if ($HaveLib) { . $LibPath }
+if (-not (Test-Path -LiteralPath $LibPath)) {
+  Write-Error "open-in-nvim.lib.ps1 is missing next to this script: $LibPath"
+  exit 1
+}
+. $LibPath
 
 # Read an optional setting from $Cfg; older config files do not have the newer keys.
 function Get-CfgValue {
@@ -80,13 +86,16 @@ function Quote-Arg {
 function Escape-For-VimSingleQuote {
   <#
     .SYNOPSIS
-      Escape a string for embedding into a single-quoted Vimscript string.
+      Escape a string for embedding into a single-quoted Vimscript string that travels through
+      --remote-send (which reads key notation).
       We double single quotes: "C:\O'Brien" -> "C:\O''Brien"
+      A literal "<" becomes "<lt>": a name such as "a<CR>b" must not be typed as keys. NTFS forbids
+      "<", but a not yet existing target can still be given on the command line.
       Backslashes are left as-is; fnameescape() will add escapes on the Vim side.
   #>
   param([string]$s)
   if ($null -eq $s) { return '' }
-  return $s.Replace("'", "''")
+  return $s.Replace("'", "''").Replace('<', '<lt>')
 }
 
 function Build-RemoteEditCommand {
@@ -136,6 +145,10 @@ function Show-Debug {
 # ---------------------------
 $NVIM = Resolve-Bin $Cfg.NVIM_BIN 'nvim'
 $NVR  = Resolve-Bin $null 'nvr'         # optional
+# OPEN_IN_NVIM_ONLY_PIDS (tests, debugging) restricts the launcher to those processes. nvr and the
+# per-user pipe name are not PID based and could reach a real session, so they stay out of it.
+$OnlyPidsMode = [bool]$env:OPEN_IN_NVIM_ONLY_PIDS
+if ($OnlyPidsMode) { $NVR = $null }
 if (-not $NVIM) {
   Write-Error "Neovim not found. Fix NVIM_BIN in config or ensure 'nvim' is on PATH."
   exit 1
@@ -145,7 +158,12 @@ if (-not $NVIM) {
 # 4) Determine target from $args (Explorer forwards %1 or %V via VBS)
 # ---------------------------
 $TargetPath = if ($args.Count -gt 0) { $args[0] } else { $PWD.Path }
-$Expanded   = [Environment]::ExpandEnvironmentVariables($TargetPath).Trim('"')
+# Explorer hands over a real path, which may legitimately contain "%NAME%" (a folder called %TEMP%):
+# environment variables are only expanded when the path as given does not exist.
+$Expanded   = $TargetPath.Trim('"')
+if (-not (Test-Path -LiteralPath $Expanded)) {
+  $Expanded = [Environment]::ExpandEnvironmentVariables($Expanded)
+}
 
 $IsDir  = $false
 $Cwd    = $PWD.Path
@@ -184,61 +202,34 @@ if ($Cfg.NVIM_SERVER -and $Cfg.NVIM_SERVER -ne '') {
 # 5.2 a stable per-user pipe (nvim-<USERNAME>) pins the "main" instance when the user's own config
 # creates it (serverstart). Preferred while it exists; PREFER_STABLE_PIPE = $false skips it.
 $StablePipe = "\\.\pipe\nvim-$env:USERNAME"
-if ($HaveLib -and (Get-CfgValue 'PREFER_STABLE_PIPE' $true) -and (Test-NvimPipe $StablePipe)) {
+if (-not $OnlyPidsMode -and (Get-CfgValue 'PREFER_STABLE_PIPE' $true) -and (Test-NvimPipe $StablePipe)) {
   if (-not $candidates.Contains($StablePipe)) { [void]$candidates.Add($StablePipe) }
 }
 
-# 5.3 every running Neovim exposes \\.\pipe\nvim.<pid>.<n> without any configuration. Headless helper
-# processes are filtered out. INSTANCE_PICK: newest (default) | oldest | ask.
-if ($HaveLib) {
-  $onlyPids = @()
-  if ($env:OPEN_IN_NVIM_ONLY_PIDS) {
-    # Debugging/test aid: restrict discovery to a comma separated PID list.
-    $onlyPids = @($env:OPEN_IN_NVIM_ONLY_PIDS -split '[,; ]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
-  }
-  $pick = [string](Get-CfgValue 'INSTANCE_PICK' 'newest')
-  $found = Select-NvimInstance -Instances @(Get-NvimInstances -OnlyPids $onlyPids) -Pick $pick
-  if ($pick -eq 'ask' -and $found.Count -gt 1 -and -not $env:OPEN_IN_NVIM_DRYRUN) {
-    $chosen = Show-NvimChooser -Instances $found
-    if (-not $chosen) { exit 0 }                       # dialog cancelled
-    if (-not $candidates.Contains($chosen)) { [void]$candidates.Add($chosen) }
-  } else {
-    foreach ($inst in $found) {
-      if (-not $candidates.Contains($inst.Pipe)) { [void]$candidates.Add($inst.Pipe) }
-    }
+# 5.3 every running Neovim exposes \\.\pipe\nvim.<pid>.<n> without any configuration. Only instances
+# with a UI attached count (headless helpers are skipped). INSTANCE_PICK: newest (default) | oldest | ask.
+$onlyPids = @()
+if ($env:OPEN_IN_NVIM_ONLY_PIDS) {
+  # Debugging/test aid: restrict discovery to a comma separated PID list.
+  $onlyPids = @($env:OPEN_IN_NVIM_ONLY_PIDS -split '[,; ]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+}
+$pick = [string](Get-CfgValue 'INSTANCE_PICK' 'newest')
+$found = Select-NvimInstance -Instances @(Get-NvimInstances -OnlyPids $onlyPids) -Pick $pick
+if ($pick -eq 'ask' -and $found.Count -gt 1 -and -not $env:OPEN_IN_NVIM_DRYRUN) {
+  $chosen = Show-NvimChooser -Instances $found
+  if (-not $chosen) { exit 0 }                       # dialog cancelled
+  if (-not $candidates.Contains($chosen)) { [void]$candidates.Add($chosen) }
+} else {
+  foreach ($inst in $found) {
+    if (-not $candidates.Contains($inst.Pipe)) { [void]$candidates.Add($inst.Pipe) }
   }
 }
 
-# 5.4 discover via nvr --serverlist (if available)
-if ($NVR) {
-  try {
-    $out = & $NVR --serverlist 2>$null
-    if ($LASTEXITCODE -eq 0 -and $out) {
-      foreach ($line in ($out -split "`r?`n")) {
-        $addr = $line.Trim()
-        if ($addr -ne '' -and -not $candidates.Contains($addr)) {
-          [void]$candidates.Add($addr)
-        }
-      }
-    }
-  } catch {
-    # ignore discovery errors
-  }
-}
-
-# 5.5 fallback: per-user pipe (matches common init.lua pattern)
-if ($candidates.Count -eq 0) {
-  [void]$candidates.Add($StablePipe)
-}
-
-# Diagnostics: OPEN_IN_NVIM_DRYRUN=1 prints the ordered candidates and exits without opening anything.
-if ($env:OPEN_IN_NVIM_DRYRUN) {
-  foreach ($c in $candidates) { Write-Output ('candidate: ' + $c) }
-  exit 0
-}
+# 5.4 / 5.5 nvr --serverlist and the per-user pipe as a last fallback are only consulted when none of
+# the candidates above took the target (see section 6): nvr is a Python script and costs about 300 ms.
 
 # ---------------------------
-# 6) Try to open via nvr (preferred) or raw nvim --remote-send
+# 6) Open the target in a running instance
 # ---------------------------
 function Invoke-Bounded {
   <#
@@ -252,7 +243,7 @@ function Invoke-Bounded {
   #>
   param([string]$Exe, [string[]]$ArgList, [int]$TimeoutMs = 5000)
   $q = @()
-  foreach ($a in $ArgList) { $q += (Quote-Arg $a) }
+  foreach ($a in $ArgList) { $q += (ConvertTo-CommandLineArg $a) }
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $Exe
   $psi.Arguments = ($q -join ' ')
@@ -266,30 +257,16 @@ function Invoke-Bounded {
   return $proc.ExitCode
 }
 
-function Test-FiletreeAvailable {
-  <#
-    .SYNOPSIS
-      True if the instance behind a named pipe has the :Filetree command (filetree.nvim).
-    .NOTES
-      Needs the RPC helpers from the lib file and a \\.\pipe\ address; anything else is "no".
-  #>
-  param([string]$server)
-  if (-not $HaveLib) { return $false }
-  if (-not $server.StartsWith('\\.\pipe\')) { return $false }
-  return ((Invoke-NvimEval -Pipe $server -Expr "exists(':Filetree') == 2") -eq 1)
-}
-
 function Try-Open-With-NvimRemote {
+  <#
+    .NOTES
+      Command-line fallback, used for servers the RPC path cannot reach (TCP addresses, or a pipe the
+      RPC client failed to talk to). Folders get cd + a directory view only: handing a path to a user
+      command through command-line text cannot be made safe for names with #, % or [.
+  #>
   param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
 
   if ($isDir) {
-    # FOLDER_OPENS_IN = 'filetree' (default): point filetree.nvim at the folder when the instance has
-    # it, otherwise (or with 'edit') fall back to a directory view.
-    if (([string](Get-CfgValue 'FOLDER_OPENS_IN' 'filetree')) -eq 'filetree' -and (Test-FiletreeAvailable $server)) {
-      $keys = "<C-\><C-n>:silent execute 'Filetree open ' . fnameescape('" + (Escape-For-VimSingleQuote $cwd) + "')<CR>"
-      $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
-      if ($rc -eq 0) { return $true }
-    }
     $keys = Build-RemoteEditCommand -cwd $cwd -file $null
     $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
     return ($rc -eq 0)
@@ -322,61 +299,137 @@ function Try-Open-With-Nvr {
   return ($rc -eq 0)
 }
 
+function Get-NvrServers {
+  <#
+    .SYNOPSIS
+      Server addresses from "nvr --serverlist"; empty when nvr is missing, fails or takes too long.
+  #>
+  if (-not $NVR) { return @() }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $NVR
+  $psi.Arguments = '--serverlist'
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $proc = $null
+  try { $proc = [System.Diagnostics.Process]::Start($psi) } catch { return @() }
+  $outTask = $proc.StandardOutput.ReadToEndAsync()
+  $errTask = $proc.StandardError.ReadToEndAsync()     # drained so a chatty nvr cannot block on a full pipe
+  if (-not $proc.WaitForExit(4000)) {
+    & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+    return @()
+  }
+  if ($proc.ExitCode -ne 0 -or -not $outTask.Wait(1000)) { return @() }
+  $list = @()
+  foreach ($line in ($outTask.Result -split "`r?`n")) {
+    $addr = $line.Trim()
+    if ($addr -ne '') { $list += $addr }
+  }
+  return $list
+}
+
+$FolderMode = [string](Get-CfgValue 'FOLDER_OPENS_IN' 'filetree')
+$OpenPath   = if ($IsDir) { $Cwd } else { $FileArg }
+
+function Open-ViaServer {
+  <#
+    .SYNOPSIS
+      Hand the target to one server address. True when it was opened.
+  #>
+  param([string]$srv)
+  # Preferred: talk to the instance over its pipe. No second nvim.exe (about a second each), the
+  # path never passes through command-line or key parsing, and a refusal comes back as an error.
+  if ($srv.StartsWith('\\.\pipe\')) {
+    $r = Invoke-NvimOpen -Pipe $srv -Path $OpenPath -IsDir $IsDir -FolderMode $FolderMode
+    if ($r.Ok) { return $true }
+    # Reached but refused (error reply, or no answer in time): the command-line route would hit the
+    # same wall, so go on to the next instance.
+    if ($r.Connected) { return $false }
+  }
+  if (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { return $true }
+  return (Try-Open-With-Nvr -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir)
+}
+
+# Diagnostics: OPEN_IN_NVIM_DRYRUN=1 prints the ordered candidates (including the late ones) and exits
+# without opening anything.
+if ($env:OPEN_IN_NVIM_DRYRUN) {
+  $all = New-Object System.Collections.ArrayList
+  foreach ($c in $candidates) { [void]$all.Add($c) }
+  foreach ($c in @(Get-NvrServers)) { if (-not $all.Contains($c)) { [void]$all.Add($c) } }
+  if ($all.Count -eq 0) { [void]$all.Add($StablePipe) }
+  foreach ($c in $all) { Write-Output ('candidate: ' + $c) }
+  exit 0
+}
+
+$tried = @{}
 foreach ($srv in $candidates) {
-  if (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { exit 0 }
-  if (Try-Open-With-Nvr -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { exit 0 }
+  $tried[$srv] = $true
+  if (Open-ViaServer $srv) { exit 0 }
+}
+
+# Last resorts, in this order: whatever nvr lists, then the per-user pipe name (matches the common
+# init.lua pattern) when there was nothing at all to try.
+$late = @(Get-NvrServers | Where-Object { -not $tried.ContainsKey($_) })
+foreach ($srv in $late) {
+  $tried[$srv] = $true
+  if (Open-ViaServer $srv) { exit 0 }
+}
+if ($candidates.Count -eq 0 -and $late.Count -eq 0 -and -not $OnlyPidsMode) {
+  if (Open-ViaServer $StablePipe) { exit 0 }
 }
 
 # ---------------------------
 # 7) No server reachable -> start a NEW instance that listens on a stable pipe
 # ---------------------------
+# Safety stop for tests and diagnostics: never open a window.
+if ($env:OPEN_IN_NVIM_NO_SPAWN) { Write-Output 'no reachable instance'; exit 3 }
 $listen = if ($Cfg.NVIM_SERVER -and $Cfg.NVIM_SERVER -ne '') { $Cfg.NVIM_SERVER } else { "\\.\pipe\nvim-$env:USERNAME" }
-$NVIM_ARGS = @('--listen', $listen)
+$NVIM_ARGS = @()
+# A name that is already taken (by an instance that refused or hung) would make "--listen" fail.
+if (-not ($listen.StartsWith('\\.\pipe\') -and (Test-NvimPipe $listen))) { $NVIM_ARGS += @('--listen', $listen) }
 if (-not $IsDir -and $FileArg) { $NVIM_ARGS += @('--', $FileArg) }
 
+# Note: the parameter is called $nvimArgs, not $args. In Windows PowerShell 5.1 a declared parameter
+# named $args does not bind; the automatic variable stays empty and the arguments are silently lost.
 function Start-With-WezTerm {
-  param([string]$cwd, [string[]]$args)
+  param([string]$cwd, [string[]]$nvimArgs)
   $wezPref = $Cfg.WEZTERM_BIN
+  $wez = $null
   if ($wezPref -and (Test-Path -LiteralPath $wezPref)) {
-    # Build the list first: "-ArgumentList @(...) + $args" parses "+" as a second positional argument.
-    $argList = @('start','--cwd', $cwd, '--', $NVIM) + $args
-    Start-Process -FilePath $wezPref -ArgumentList $argList | Out-Null
-    return $true
+    $wez = $wezPref
+  } else {
+    $wezCmd = Get-Command -Name 'wezterm' -ErrorAction SilentlyContinue
+    if ($wezCmd) { $wez = $wezCmd.Source }
   }
-  $wezCmd = Get-Command -Name 'wezterm' -ErrorAction SilentlyContinue
-  if ($wezCmd) {
-    $argList = @('start','--cwd', $cwd, '--', $NVIM) + $args
-    Start-Process -FilePath $wezCmd.Source -ArgumentList $argList | Out-Null
-    return $true
-  }
-  return $false
-}
-
-function Start-With-WindowsTerminal {
-  param([string]$cwd, [string[]]$args)
-  $wtCmd = Get-Command -Name 'wt' -ErrorAction SilentlyContinue
-  if ($wtCmd) {
-    $wt = $wtCmd.Source
-    $argList = @('-w','0','nt','-d', $cwd, '--', $NVIM) + $args
-    Start-Process -FilePath $wt -ArgumentList $argList | Out-Null
-    return $true
-  }
-  return $false
-}
-
-function Start-With-CmdStart {
-  param([string]$cwd, [string[]]$args)
-  $quotedCwd = Quote-Arg $cwd
-  $cmdline   = Quote-Arg $NVIM
-  if ($args.Count -gt 0) {
-    $qa = @(); foreach ($a in $args) { $qa += (Quote-Arg $a) }
-    $cmdline += ' ' + ($qa -join ' ')
-  }
-  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','start','','/D', $quotedCwd, $cmdline) | Out-Null
+  if (-not $wez) { return $false }
+  Invoke-Spawn -FilePath $wez -ArgList (@('start', '--cwd', $cwd, '--', $NVIM) + $nvimArgs)
   return $true
 }
 
-if (Start-With-WezTerm -cwd $Cwd -args $NVIM_ARGS) { exit 0 }
-if (Start-With-WindowsTerminal -cwd $Cwd -args $NVIM_ARGS) { exit 0 }
-[void](Start-With-CmdStart -cwd $Cwd -args $NVIM_ARGS)
+function Start-With-WindowsTerminal {
+  param([string]$cwd, [string[]]$nvimArgs)
+  $wtCmd = Get-Command -Name 'wt' -ErrorAction SilentlyContinue
+  if (-not $wtCmd) { return $false }
+  Invoke-Spawn -FilePath $wtCmd.Source -ArgList (@('-w', '0', 'nt', '-d', $cwd, '--', $NVIM) + $nvimArgs)
+  return $true
+}
+
+function Start-With-CmdStart {
+  param([string]$cwd, [string[]]$nvimArgs)
+  $quotedCwd = Quote-Arg $cwd
+  $cmdline   = Quote-Arg $NVIM
+  if ($nvimArgs.Count -gt 0) {
+    $qa = @(); foreach ($a in $nvimArgs) { $qa += (Quote-Arg $a) }
+    $cmdline += ' ' + ($qa -join ' ')
+  }
+  # '""' is the (empty) window title: "start" takes the first quoted argument for the title, and an
+  # empty array element is rejected by Windows PowerShell 5.1 ("argument is null or empty").
+  Invoke-Spawn -FilePath 'cmd.exe' -Raw -ArgList @('/c', 'start', '""', '/D', $quotedCwd, $cmdline)
+  return $true
+}
+
+if (Start-With-WezTerm -cwd $Cwd -nvimArgs $NVIM_ARGS) { exit 0 }
+if (Start-With-WindowsTerminal -cwd $Cwd -nvimArgs $NVIM_ARGS) { exit 0 }
+[void](Start-With-CmdStart -cwd $Cwd -nvimArgs $NVIM_ARGS)
 exit 0
