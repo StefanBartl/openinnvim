@@ -266,10 +266,30 @@ function Invoke-Bounded {
   return $proc.ExitCode
 }
 
+function Test-FiletreeAvailable {
+  <#
+    .SYNOPSIS
+      True if the instance behind a named pipe has the :Filetree command (filetree.nvim).
+    .NOTES
+      Needs the RPC helpers from the lib file and a \\.\pipe\ address; anything else is "no".
+  #>
+  param([string]$server)
+  if (-not $HaveLib) { return $false }
+  if (-not $server.StartsWith('\\.\pipe\')) { return $false }
+  return ((Invoke-NvimEval -Pipe $server -Expr "exists(':Filetree') == 2") -eq 1)
+}
+
 function Try-Open-With-NvimRemote {
   param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
 
   if ($isDir) {
+    # FOLDER_OPENS_IN = 'filetree' (default): point filetree.nvim at the folder when the instance has
+    # it, otherwise (or with 'edit') fall back to a directory view.
+    if (([string](Get-CfgValue 'FOLDER_OPENS_IN' 'filetree')) -eq 'filetree' -and (Test-FiletreeAvailable $server)) {
+      $keys = "<C-\><C-n>:silent execute 'Filetree open ' . fnameescape('" + (Escape-For-VimSingleQuote $cwd) + "')<CR>"
+      $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
+      if ($rc -eq 0) { return $true }
+    }
     $keys = Build-RemoteEditCommand -cwd $cwd -file $null
     $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
     return ($rc -eq 0)

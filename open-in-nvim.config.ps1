@@ -23,4 +23,9 @@ $Cfg = [ordered]@{
   #   'newest' = zuletzt gestartete (Standard), 'oldest' = am längsten laufende,
   #   'ask'    = Auswahlfenster mit Arbeitsverzeichnis und Datei jeder Instanz.
   INSTANCE_PICK = 'newest'
+
+  # Was bei einem Ordner in "current instance" passiert:
+  #   'filetree' = filetree.nvim auf den Ordner richten (:Filetree open <dir>), wenn die Instanz es hat,
+  #   'edit'     = immer cd + Verzeichnisansicht (:edit .).
+  FOLDER_OPENS_IN = 'filetree'
 }

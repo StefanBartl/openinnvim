@@ -143,7 +143,10 @@ Diagnose ohne etwas zu öffnen: `OPEN_IN_NVIM_DRYRUN=1` gibt die geordnete Kandi
 ## Hinweise
 
 - WezTerm-Logs auf „ERROR“ kann man in der eigenen wezterm.lua auf log_info umstellen.
-- Für Verzeichnisse öffnet „current“ standardmäßig eine Verzeichnisansicht (cd + edit .).
+- Für Ordner richtet „current“ standardmäßig `filetree.nvim` auf den Ordner (`:Filetree open <ordner>`), sofern die Instanz
+  den Befehl kennt; sonst (oder mit `FOLDER_OPENS_IN = 'edit'`) wird cd + Verzeichnisansicht (`:edit .`) benutzt.
+- Alle Befehle, die „current“ in die Sitzung schickt, laufen mit `:silent`: `:cd` gibt den Pfad aus, und ein Pfad, der
+  breiter als das Fenster ist, würde einen Hit-Enter-Prompt auslösen und die Instanz blockieren.
 - Die Implementierung ist PS 5.1 kompatibel (keine ?. oder ?: Operatoren), Single-Responsibility und mit robuster Argument-Quotierung umgesetzt.
 
 ---

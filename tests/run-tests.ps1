@@ -167,11 +167,22 @@ try {
   Assert-That 'older instance left untouched'                     (-not ($e1 -like '*target file.txt*')) "buffers=[$e1]"
 
   $dir = Join-Path $tmp 'sub dir'; New-Item -ItemType Directory -Force $dir | Out-Null
+  # Newest instance (gui2) has a :Filetree stand-in: a folder must go there, not into cd + edit.
   $r4 = Invoke-Launcher -Env $noDry -Target $dir
   Start-Sleep -Milliseconds 800
-  $cwd = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()'
-  Assert-That 'directory open changes cwd of the newest instance' ($cwd -eq $dir) "cwd=[$cwd] want=[$dir]"
+  $ft = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", "")'
   Assert-That 'launcher exits 0 for directory' ($r4.Code -eq 0) "code=$($r4.Code)"
+  Assert-That 'folder is handed to :Filetree open (path with a space intact)' (($ft -is [string]) -and ($ft -match '^open ') -and (($ft -replace '\\ ', ' ') -like "*$dir")) "g:ft_args=[$ft]"
+  $cwdFt = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'getcwd()'
+  Assert-That 'with :Filetree the cwd is left to filetree.nvim' ($cwdFt -ne $dir) "cwd=[$cwdFt]"
+
+  # Older instance (gui1) has no :Filetree: fall back to cd + directory view.
+  $envNoFt = $noDry.Clone(); $envNoFt['OPEN_IN_NVIM_ONLY_PIDS'] = "$($P.tui1)"
+  $r4b = Invoke-Launcher -Env $envNoFt -Target $dir
+  Start-Sleep -Milliseconds 800
+  $cwd = Invoke-NvimEval -Pipe $newest[1].Pipe -Expr 'getcwd()'
+  Assert-That 'without :Filetree the directory open changes cwd' ($cwd -eq $dir) "cwd=[$cwd] want=[$dir]"
+  Assert-That 'launcher exits 0 for directory (fallback)' ($r4b.Code -eq 0) "code=$($r4b.Code)"
 
   $envOlder = $noDry.Clone(); $envOlder['OPEN_IN_NVIM_ONLY_PIDS'] = "$($P.tui1)"
   $r5 = Invoke-Launcher -Env $envOlder -Target $targetFile

@@ -18,7 +18,7 @@ assert(out and stop, "usage: fixture.lua <pids-out-file> <stop-file>")
 local nvim = vim.v.progpath
 local jobs, lines = {}, {}
 
-local function spawn(label, args, attach_ui)
+local function spawn(label, args, attach_ui, setup_lua)
 	local cmd = { nvim }
 	vim.list_extend(cmd, args)
 	local id = vim.fn.jobstart(cmd, { rpc = attach_ui or false })
@@ -28,12 +28,19 @@ local function spawn(label, args, attach_ui)
 	if attach_ui then
 		-- An --embed instance finishes its startup only once a UI has attached.
 		vim.rpcrequest(id, "nvim_ui_attach", 80, 24, {})
+		if setup_lua then
+			vim.rpcrequest(id, "nvim_exec_lua", setup_lua, {})
+		end
 	end
 	vim.wait(1500) -- distinct start times, and give each one time to open its pipe
 end
 
+-- gui1 has no :Filetree (directory falls back to cd + edit); gui2 gets a stand-in that records its
+-- arguments in g:ft_args, so the tests can see what the launcher asked filetree.nvim to do.
 spawn("gui1", { "--clean", "--embed" }, true)
-spawn("gui2", { "--clean", "--embed" }, true)
+spawn("gui2", { "--clean", "--embed" }, true, [[
+vim.api.nvim_create_user_command("Filetree", function(o) vim.g.ft_args = o.args end, { nargs = "*" })
+]])
 spawn("headless", { "--clean", "--headless" })
 spawn("embedhl", { "--clean", "--embed", "--headless", "-n", "-u", "NONE" })
 
