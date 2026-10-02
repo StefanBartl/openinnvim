@@ -26,7 +26,7 @@ function Remove-Key {
       Write-Host "Removed: $key"
     }
   } catch {
-    Write-Warning "Could not remove $key: $($_.Exception.Message)"
+    Write-Warning "Could not remove ${key}: $($_.Exception.Message)"
   }
 }
 

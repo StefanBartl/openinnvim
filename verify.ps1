@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $Here = $PSScriptRoot
 if (-not $Here -or $Here -eq '') {
   $scriptPath = $MyInvocation.MyCommand.Path
-  $Here = ($scriptPath -and $scriptPath -ne '') ? (Split-Path -Path $scriptPath -Parent) : $PWD.Path
+  if ($scriptPath -and $scriptPath -ne '') { $Here = Split-Path -Path $scriptPath -Parent } else { $Here = $PWD.Path }
 }
 
 $VbsNew     = Join-Path $Here 'open-in-nvim.vbs'
