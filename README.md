@@ -36,7 +36,7 @@ each page answers.
 **The Basics**
 
 - [Requirements](docs/requirements.md) — Windows, PowerShell and Neovim versions, and the terminal that starts a new instance.
-- [Installation](docs/installation.md) — the junction, the six registry entries, and how to remove them again.
+- [Installation](docs/installation.md) — one script: files, config and the six registry entries; and the uninstaller.
 - [Quickstart](docs/quickstart.md) — the first click, and how to see what the launcher would do without opening anything.
 
 **Configuration**

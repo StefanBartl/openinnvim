@@ -8,9 +8,9 @@ Thanks for your interest in contributing to `openinnvim`.
    ```sh
    git clone https://github.com/StefanBartl/openinnvim.git
    ```
-2. Point the junction at your clone while you work on it —
-   [installation.md](installation.md). The registry entries run the scripts through
-   `C:\tools\OpenInNvim`, so what you edit is what a click runs.
+2. Register the menu *in place* while you work on it —
+   `install.ps1 -InstallDir $PWD.Path`, see [installation.md](installation.md#in-place-development).
+   The entries then run the scripts in your clone, so what you edit is what a click runs.
 3. Run the tests (below) after every change.
 
 ## Guidelines
@@ -47,9 +47,12 @@ launcher sees is a fake, no window is ever started (`OPEN_IN_NVIM_NO_SPAWN`,
 run.
 
 What it covers: the msgpack encoder and decoder (including a depth limit),
-command-line quoting checked against `CommandLineToArgvW`, instance discovery and
-ordering, opening files and folders over RPC (special characters, `:Filetree`
-present and absent), the new-instance command, and both launcher scripts.
+command-line quoting checked against `CommandLineToArgvW`, folder-path normalisation,
+instance discovery and ordering, opening files and folders over RPC (special characters,
+`:Filetree` present and absent), the new-instance command, both launcher scripts, the
+process-tree walk behind `FOCUS_TERMINAL`, and `install.ps1` / `uninstall.ps1` against a
+throw-away folder and registry key — including the installed VBS driving a throw-away
+instance end to end. The real context-menu entries are never touched.
 
 `tests\fixture.lua` is linted with `stylua --check` and `luacheck`.
 

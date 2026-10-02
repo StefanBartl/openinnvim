@@ -29,6 +29,12 @@ if every candidate refuses, it starts a new instance.
 A TCP `NVIM_SERVER` has no RPC path here and goes through `nvim --server <addr>
 --remote`.
 
+## Raising the window
+
+`FOCUS_TERMINAL = $true` brings the instance's terminal window to the front after the
+file has been opened — [../configuration.md](../configuration.md#focus_terminal). Off by
+default; with several windows in one terminal process it can pick the wrong one.
+
 ## When nothing is reachable
 
 A new Neovim starts in a terminal — WezTerm, then Windows Terminal, then `cmd.exe` —

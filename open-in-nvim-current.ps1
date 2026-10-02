@@ -171,7 +171,7 @@ if (Test-Path -LiteralPath $Expanded) {
   $item = Get-Item -LiteralPath $Expanded
   if ($item.PSIsContainer) {
     $IsDir = $true
-    $Cwd   = $item.FullName
+    $Cwd   = ConvertTo-PlainDirPath $item.FullName
   } else {
     $IsDir   = $false
     $Cwd     = $item.Directory.FullName
@@ -180,7 +180,7 @@ if (Test-Path -LiteralPath $Expanded) {
 } else {
   $parent = Split-Path -Path $Expanded -Parent
   if ($parent -and (Test-Path -LiteralPath $parent)) {
-    $Cwd = (Get-Item -LiteralPath $parent).FullName
+    $Cwd = ConvertTo-PlainDirPath (Get-Item -LiteralPath $parent).FullName
   }
   $FileArg = $Expanded  # allow creating a new file remotely
   # An unrooted name starting with '-' would be parsed as an option by --remote.
@@ -255,9 +255,9 @@ function Invoke-Bounded {
 function Try-Open-With-NvimRemote {
   <#
     .NOTES
-      Command-line fallback, used for servers the RPC path cannot reach (TCP addresses, or a pipe the
-      RPC client failed to talk to). Folders get cd + a directory view only: handing a path to a user
-      command through command-line text cannot be made safe for names with #, % or [.
+      Command-line fallback, used for addresses the RPC client cannot use (TCP). Folders get cd + a
+      directory view only: handing a path to a user command through command-line text cannot be made
+      safe for names with #, % or [.
   #>
   param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
 
@@ -293,10 +293,14 @@ function Open-ViaServer {
   # path never passes through command-line or key parsing, and a refusal comes back as an error.
   if ($srv.StartsWith('\\.\pipe\')) {
     $r = Invoke-NvimOpen -Pipe $srv -Path $OpenPath -IsDir $IsDir -FolderMode $FolderMode
-    if ($r.Ok) { return $true }
-    # Reached but refused (error reply, or no answer in time): the command-line route would hit the
-    # same wall, so go on to the next instance.
-    if ($r.Connected) { return $false }
+    if ($r.Ok) {
+      if ([bool](Get-CfgValue 'FOCUS_TERMINAL' $false)) { [void](Set-NvimInstanceFocus -Pipe $srv) }
+      return $true
+    }
+    # Refused (error reply, no answer in time) or not reachable at all: the command-line route would hit
+    # the same wall, only slower, so go on to the next instance. The command line is for addresses the
+    # RPC client cannot use, i.e. TCP.
+    return $false
   }
   return (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir)
 }

@@ -265,6 +265,17 @@ try {
   $rn = Invoke-Launcher -Env $envNoInst -Target $targetFile
   Assert-That 'safety stop: exit code 3 and no window' (($rn.Code -eq 3) -and (($rn.Out -join ' ') -match 'no reachable instance')) "code=$($rn.Code) out=$($rn.Out -join ' / ')"
 
+  # A configured NVIM_SERVER pipe nobody listens on must fail fast: the command line cannot do better
+  # than RPC for a pipe, and each attempt there used to cost seconds before the new instance started.
+  $cfgCopy = Join-Path $tmp 'cfg copy'; New-Item -ItemType Directory -Force $cfgCopy | Out-Null
+  foreach ($f in 'open-in-nvim-current.ps1', 'open-in-nvim.lib.ps1') { Copy-Item -LiteralPath (Join-Path $Root $f) -Destination $cfgCopy }
+  Set-Content -LiteralPath (Join-Path $cfgCopy 'open-in-nvim.config.ps1') -Value ("`$Cfg = [ordered]@{ NVIM_BIN = '" + $nvim + "'; NVIM_SERVER = '\\.\pipe\oin-nobody-listens-here' }")
+  $swm = [Diagnostics.Stopwatch]::StartNew()
+  $rm = Invoke-Launcher -Env $envNoInst -Target $targetFile -Script (Join-Path $cfgCopy 'open-in-nvim-current.ps1')
+  $missMs = $swm.ElapsedMilliseconds
+  Assert-That 'a configured pipe that does not exist is given up on quickly' (($rm.Code -eq 3) -and ($missMs -lt 2200)) "code=$($rm.Code) ms=$missMs"
+  Write-Host "       (unreachable configured pipe -> exit 3 in $missMs ms incl. PowerShell start)"
+
   # The command that would start a new Neovim (printed instead of started). Windows PowerShell 5.1 did
   # not bind a parameter called $args, so the new instance used to get no --listen and no file.
   $spaceDir = Join-Path $tmp 'My Dir'; New-Item -ItemType Directory -Force $spaceDir | Out-Null
@@ -292,6 +303,131 @@ try {
   $liner = "$(@($rroot.Out | Where-Object { "$_" -like 'spawn:*' })[0])"
   if ($liner -match '"--cwd"|"-d"') {
     Assert-That 'drive root keeps its closing quote (trailing backslash doubled)' ($liner.Contains('"C:\\"')) "line=$liner"
+  }
+
+  # -------------------------------------------------------------------------------------------
+  Write-Host '== folder path normalisation'
+  Assert-That 'trailing backslash is removed'          ((ConvertTo-PlainDirPath 'C:\a b\c\') -eq 'C:\a b\c')
+  Assert-That 'several trailing separators are removed' ((ConvertTo-PlainDirPath 'C:\a\\/') -eq 'C:\a')
+  Assert-That 'a drive root keeps its backslash'        ((ConvertTo-PlainDirPath 'C:\') -eq 'C:\')
+  Assert-That 'a path without trailing separator stays' ((ConvertTo-PlainDirPath 'C:\a\b') -eq 'C:\a\b')
+
+  Write-Host '== focus helpers'
+  # Pure part: walking up a process tree to the first ancestor that owns a window.
+  $tree = @{ 10 = 20; 20 = 30; 30 = 40; 40 = 0 }
+  Assert-That 'window owner found up the tree' ((Find-WindowOwnerPid -StartPid 10 -ParentOf $tree -HasWindow { param($x) $x -eq 30 }) -eq 30)
+  Assert-That 'the start process itself is not considered' ($null -eq (Find-WindowOwnerPid -StartPid 10 -ParentOf $tree -HasWindow { param($x) $x -eq 10 }))
+  Assert-That 'no window anywhere returns null' ($null -eq (Find-WindowOwnerPid -StartPid 10 -ParentOf $tree -HasWindow { param($x) $false }))
+  $loop = @{ 10 = 20; 20 = 10 }
+  Assert-That 'a parent loop ends instead of spinning' ($null -eq (Find-WindowOwnerPid -StartPid 10 -ParentOf $loop -HasWindow { param($x) $false }))
+  Assert-That 'unknown start process returns null' ($null -eq (Find-WindowOwnerPid -StartPid 99 -ParentOf $tree -HasWindow { param($x) $true }))
+  # The Win32 part cannot be asserted without a window, but it must never throw: a dead pipe gives $false.
+  Assert-That 'focus on an unreachable instance fails quietly' ((Set-NvimInstanceFocus -Pipe '\\.\pipe\nvim.999999.0') -eq $false)
+
+  # -------------------------------------------------------------------------------------------
+  Write-Host '== install / uninstall (throw-away folder and registry key, never the real entries)'
+  $installer = Join-Path $Root 'install.ps1'
+  $uninstaller = Join-Path $Root 'uninstall.ps1'
+  $hkcu = [Microsoft.Win32.Registry]::CurrentUser
+  $testRoot = 'Software\oin_test_' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+  $classes = $testRoot + '\Classes'
+  function Get-RegDefault {
+    param([string]$Sub, [string]$Name = '')
+    $k = $hkcu.OpenSubKey("$classes\$Sub")
+    if (-not $k) { return $null }
+    $v = $k.GetValue($Name); $k.Close(); return $v
+  }
+  function Invoke-PsFile {
+    param([string]$File, [string[]]$FileArgs)
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $File @FileArgs 2>&1
+    return @{ Out = @($out); Code = $LASTEXITCODE }
+  }
+  $instDir = Join-Path $tmp 'inst dir'
+  try {
+    # a legacy entry of an earlier version must disappear
+    $legacy = $hkcu.CreateSubKey("$classes\*\shell\Open_in_Neovim_nvr"); $legacy.Close()
+
+    $ri = Invoke-PsFile $installer @('-InstallDir', $instDir, '-ClassesKey', $classes, '-NvimExe', $nvim)
+    Assert-That 'install exits 0' ($ri.Code -eq 0) "code=$($ri.Code) out=$($ri.Out -join ' / ')"
+    $expectNew = 'wscript.exe //nologo "' + (Join-Path $instDir 'open-in-nvim.vbs') + '" "%1"'
+    $expectCur = 'wscript.exe //nologo "' + (Join-Path $instDir 'open-in-nvim-current.vbs') + '" "%1"'
+    $expectBg  = 'wscript.exe //nologo "' + (Join-Path $instDir 'open-in-nvim-current.vbs') + '" "%V"'
+    Assert-That 'file entry runs the installed new-instance VBS'     ((Get-RegDefault '*\shell\Open_in_Neovim_new\command') -eq $expectNew)
+    Assert-That 'file entry runs the installed current-instance VBS' ((Get-RegDefault '*\shell\Open_in_Neovim_current\command') -eq $expectCur)
+    Assert-That 'folder entries exist'                               (((Get-RegDefault 'Directory\shell\Open_in_Neovim_new\command') -ne $null) -and ((Get-RegDefault 'Directory\shell\Open_in_Neovim_current\command') -eq $expectCur))
+    Assert-That 'folder background passes %V'                        ((Get-RegDefault 'Directory\Background\shell\Open_in_Neovim_current\command') -eq $expectBg)
+    Assert-That 'labels and icon are set'                            (((Get-RegDefault '*\shell\Open_in_Neovim_current') -eq 'Open with Neovim (current instance)') -and ((Get-RegDefault '*\shell\Open_in_Neovim_new') -eq 'Open with Neovim (new instance)') -and ((Get-RegDefault '*\shell\Open_in_Neovim_new' 'Icon') -eq $nvim))
+    Assert-That 'legacy entry removed'                               ($null -eq (Get-RegDefault '*\shell\Open_in_Neovim_nvr'))
+    $missingFiles = @('open-in-nvim.vbs', 'open-in-nvim-current.vbs', 'open-in-nvim.ps1', 'open-in-nvim-current.ps1', 'open-in-nvim.lib.ps1', 'open-in-nvim.config.ps1', 'install.manifest.txt') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $instDir $_)) }
+    Assert-That 'all launcher files, the config and the manifest are installed' (@($missingFiles).Count -eq 0) "missing=$($missingFiles -join ',')"
+    $cfgText = [IO.File]::ReadAllText((Join-Path $instDir 'open-in-nvim.config.ps1'))
+    Assert-That 'the detected nvim.exe is written into the new config' ($cfgText -match ("NVIM_BIN\s*=\s*'" + [regex]::Escape($nvim) + "'"))
+    Assert-That 'no hard-coded C:\tools path is installed'            (-not ((Get-Content -LiteralPath (Join-Path $instDir 'open-in-nvim-current.vbs') -Raw) -match 'C:\\tools'))
+
+    # running again: config is kept, -Force replaces it
+    Add-Content -LiteralPath (Join-Path $instDir 'open-in-nvim.config.ps1') -Value '# my own edit'
+    [void](Invoke-PsFile $installer @('-InstallDir', $instDir, '-ClassesKey', $classes, '-NvimExe', $nvim))
+    Assert-That 're-install keeps an edited config' ([IO.File]::ReadAllText((Join-Path $instDir 'open-in-nvim.config.ps1')) -match 'my own edit')
+    [void](Invoke-PsFile $installer @('-InstallDir', $instDir, '-ClassesKey', $classes, '-NvimExe', $nvim, '-Force'))
+    Assert-That '-Force replaces the config' (-not ([IO.File]::ReadAllText((Join-Path $instDir 'open-in-nvim.config.ps1')) -match 'my own edit'))
+
+    # the installed chain end to end: VBS -> PowerShell -> RPC -> the throw-away instance
+    $vbsFile = Join-Path $tmp 'via vbs.txt'; Set-Content -LiteralPath $vbsFile -Value 'v'
+    $vbsDir = Join-Path $tmp 'vbs dir'; New-Item -ItemType Directory -Force $vbsDir | Out-Null
+    $savedEnv = @{}
+    $vbsEnv = @{ OPEN_IN_NVIM_ONLY_PIDS = (($P.tui1, $P.tui2) -join ','); USERNAME = 'oin_test_nobody'; OPEN_IN_NVIM_NO_SPAWN = '1' }
+    foreach ($k in $vbsEnv.Keys) { $savedEnv[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $vbsEnv[$k]) }
+    try {
+      & wscript.exe //nologo (Join-Path $instDir 'open-in-nvim-current.vbs') $vbsFile
+      $seen = $false
+      for ($i = 0; $i -lt 40 -and -not $seen; $i++) {
+        Start-Sleep -Milliseconds 250
+        $bufs = Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'join(map(getbufinfo({"buflisted": 1}), "v:val.name"), "|")'
+        $seen = ($bufs -is [string]) -and $bufs.Contains($vbsFile)
+      }
+      Assert-That 'installed VBS opens a file with a space in the running instance' $seen "buffers=[$bufs]"
+
+      # a folder path ending in a backslash, with a space: the VBS must not let it eat its closing quote
+      [void](Invoke-NvimRpc -Pipe $newest[0].Pipe -Method 'nvim_exec_lua' -Params @('vim.g.ft_args = nil', [object[]]@()))   # earlier tests left a value
+      & wscript.exe //nologo (Join-Path $instDir 'open-in-nvim-current.vbs') ($vbsDir + '\')
+      $ftv = @()
+      for ($i = 0; $i -lt 40 -and $ftv.Count -ne 2; $i++) {
+        Start-Sleep -Milliseconds 250
+        $ftv = @(Invoke-NvimEval -Pipe $newest[0].Pipe -Expr 'get(g:, "ft_args", [])')
+      }
+      Assert-That 'installed VBS handles a folder path with a space and a trailing backslash' (($ftv.Count -eq 2) -and ($ftv[1] -eq $vbsDir)) "g:ft_args=[$($ftv -join ' | ')]"
+    } finally {
+      foreach ($k in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedEnv[$k]) }
+    }
+
+    # uninstall: entries and launcher files go, the edited config stays, the folder stays while it is not empty
+    $ru = Invoke-PsFile $uninstaller @('-InstallDir', $instDir, '-ClassesKey', $classes, '-RemoveFiles')
+    Assert-That 'uninstall exits 0' ($ru.Code -eq 0) "code=$($ru.Code) out=$($ru.Out -join ' / ')"
+    $left = @('*\shell\Open_in_Neovim_new', '*\shell\Open_in_Neovim_current', 'Directory\shell\Open_in_Neovim_new', 'Directory\shell\Open_in_Neovim_current', 'Directory\Background\shell\Open_in_Neovim_new', 'Directory\Background\shell\Open_in_Neovim_current') | Where-Object { $null -ne $hkcu.OpenSubKey("$classes\$_") }
+    Assert-That 'all six entries are removed' (@($left).Count -eq 0) "left=$($left -join ',')"
+    Assert-That 'launcher files are removed'  (-not (Test-Path -LiteralPath (Join-Path $instDir 'open-in-nvim-current.ps1')))
+    Assert-That 'the config is kept without -RemoveConfig' (Test-Path -LiteralPath (Join-Path $instDir 'open-in-nvim.config.ps1'))
+
+    # reinstall, then remove everything including the config: the folder goes too
+    [void](Invoke-PsFile $installer @('-InstallDir', $instDir, '-ClassesKey', $classes, '-NvimExe', $nvim))
+    [void](Invoke-PsFile $uninstaller @('-InstallDir', $instDir, '-ClassesKey', $classes, '-RemoveFiles', '-RemoveConfig'))
+    Assert-That '-RemoveConfig removes the config and the then-empty folder' (-not (Test-Path -LiteralPath $instDir))
+
+    # in place: entries point at the repository, nothing is copied, its config is untouched
+    $cfgBefore = (Get-FileHash -LiteralPath (Join-Path $Root 'open-in-nvim.config.ps1')).Hash
+    [void](Invoke-PsFile $installer @('-InstallDir', $Root, '-ClassesKey', $classes, '-NvimExe', $nvim))
+    Assert-That 'in-place install points the entry at the repository' ((Get-RegDefault '*\shell\Open_in_Neovim_current\command') -eq ('wscript.exe //nologo "' + (Join-Path $Root 'open-in-nvim-current.vbs') + '" "%1"'))
+    Assert-That 'in-place install leaves the repository config alone' ($cfgBefore -eq (Get-FileHash -LiteralPath (Join-Path $Root 'open-in-nvim.config.ps1')).Hash)
+    Assert-That 'in-place install writes no manifest into the repository' (-not (Test-Path -LiteralPath (Join-Path $Root 'install.manifest.txt')))
+    [void](Invoke-PsFile $uninstaller @('-InstallDir', $Root, '-ClassesKey', $classes, '-RemoveFiles', '-RemoveConfig'))
+    Assert-That 'uninstall never deletes files of the repository itself' ((Test-Path -LiteralPath (Join-Path $Root 'open-in-nvim-current.ps1')) -and (Test-Path -LiteralPath (Join-Path $Root 'open-in-nvim.config.ps1')))
+
+    # dry run writes nothing
+    $dry = Join-Path $tmp 'dry dir'
+    $rd = Invoke-PsFile $installer @('-InstallDir', $dry, '-ClassesKey', ($testRoot + '\Dry'), '-NvimExe', $nvim, '-DryRun')
+    Assert-That 'dry run changes neither folder nor registry' (($rd.Code -eq 0) -and -not (Test-Path -LiteralPath $dry) -and ($null -eq $hkcu.OpenSubKey($testRoot + '\Dry')))
+  } finally {
+    try { $hkcu.DeleteSubKeyTree($testRoot, $false) } catch {}
   }
 }
 finally {

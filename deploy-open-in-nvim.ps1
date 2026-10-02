@@ -42,6 +42,19 @@ Copy-Item -Path $pubCurrentExe -Destination $InstallDir -Force
 Copy-Item -Path $vbsNew        -Destination $InstallDir -Force
 Copy-Item -Path $vbsCurrent    -Destination $InstallDir -Force
 
+# The VBS files look for their PowerShell scripts next to themselves, so those travel with them.
+# The config is only copied when absent (an existing one is yours; install.ps1 writes it with the
+# detected nvim.exe).
+foreach ($f in 'open-in-nvim.ps1', 'open-in-nvim-current.ps1', 'open-in-nvim.lib.ps1') {
+    $src = Join-Path $SourceRoot $f
+    if (-not (Test-Path -LiteralPath $src)) { throw "Missing: $src" }
+    Copy-Item -LiteralPath $src -Destination $InstallDir -Force
+}
+$cfgSrc = Join-Path $SourceRoot 'open-in-nvim.config.ps1'
+if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'open-in-nvim.config.ps1'))) {
+    Copy-Item -LiteralPath $cfgSrc -Destination $InstallDir
+}
+
 # Copy logos
 $logosDest = Join-Path $InstallDir 'Logos'
 New-Item -Path $logosDest -ItemType Directory -Force | Out-Null

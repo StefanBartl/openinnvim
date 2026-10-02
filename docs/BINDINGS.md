@@ -15,12 +15,12 @@ Windows 11).
 
 ## Registry keys
 
-Written by `install-context.ps1`; all under `HKCU`, so no administrator rights.
+Written by `install.ps1`; all under `HKCU`, so no administrator rights. `<dir>` below is the install folder (default `%LOCALAPPDATA%\OpenInNvim`).
 
 | Key | `command` default value |
 | --- | --- |
-| `Software\Classes\*\shell\Open_in_Neovim_new` | `wscript.exe //nologo "C:\tools\OpenInNvim\open-in-nvim.vbs" "%1"` |
-| `Software\Classes\*\shell\Open_in_Neovim_current` | `wscript.exe //nologo "C:\tools\OpenInNvim\open-in-nvim-current.vbs" "%1"` |
+| `Software\Classes\*\shell\Open_in_Neovim_new` | `wscript.exe //nologo "<dir>\open-in-nvim.vbs" "%1"` |
+| `Software\Classes\*\shell\Open_in_Neovim_current` | `wscript.exe //nologo "<dir>\open-in-nvim-current.vbs" "%1"` |
 | `Software\Classes\Directory\shell\Open_in_Neovim_new` | same as the first, with `"%1"` |
 | `Software\Classes\Directory\shell\Open_in_Neovim_current` | same as the second, with `"%1"` |
 | `Software\Classes\Directory\Background\shell\Open_in_Neovim_new` | same as the first, with `"%V"` |
@@ -29,8 +29,8 @@ Written by `install-context.ps1`; all under `HKCU`, so no administrator rights.
 `%1` is the clicked item; `%V` is the folder whose background was clicked.
 
 The VBS file only exists to start PowerShell **without a console window**
-(`WScript.Shell.Run` with window style 0); it forwards its arguments and does nothing
-else.
+(`WScript.Shell.Run` with window style 0); it forwards its arguments to the `.ps1` next
+to it and does nothing else.
 
 ## Diagnostic switches
 
@@ -43,5 +43,5 @@ Environment variables, listed with their effect in
 Get-ItemProperty -LiteralPath 'HKCU:\Software\Classes\*\shell\Open_in_Neovim_current\command'
 ```
 
-shows the command a click runs. If the junction target is wrong, this command is
+shows the command a click runs. If the folder it names is gone, this command is
 what points at it — [troubleshooting.md](troubleshooting.md#click-does-nothing).

@@ -11,5 +11,5 @@ Grouped by what part of the tool they belong to, not by how recently they were a
 - **[DEFAULT-APPS.md](DEFAULT-APPS.md)** — the optional default-application registration
   with two exe launchers.
 
-The entries themselves come from `install-context.ps1`; the registry keys are listed
+The entries themselves come from `install.ps1`; the registry keys are listed
 in [../BINDINGS.md](../BINDINGS.md).

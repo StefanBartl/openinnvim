@@ -12,6 +12,7 @@ $Cfg = [ordered]@{
   PREFER_STABLE_PIPE = $true
   INSTANCE_PICK      = 'newest'
   FOLDER_OPENS_IN    = 'filetree'
+  FOCUS_TERMINAL     = $false
 }
 ```
 
@@ -23,6 +24,7 @@ $Cfg = [ordered]@{
 | `PREFER_STABLE_PIPE` | `$true` | current | Try `\\.\pipe\nvim-%USERNAME%` first, when it exists. |
 | `INSTANCE_PICK` | `'newest'` | current | Which running instance goes first: `newest`, `oldest` or `ask`. |
 | `FOLDER_OPENS_IN` | `'filetree'` | current | What a folder does: `filetree` or `edit`. |
+| `FOCUS_TERMINAL` | `$false` | current | Bring the window that hosts the instance to the front after opening. |
 
 ## `NVIM_SERVER`
 
@@ -61,6 +63,27 @@ session — see [architecture.md](architecture.md#which-instances-count).
   (`:edit .`).
 
 Details: [FEATURES/FOLDERS.md](FEATURES/FOLDERS.md).
+
+## `FOCUS_TERMINAL`
+
+Off by default. Windows does not let a background process raise a window, so after a
+click the editor may open its file behind whatever you were looking at. With
+`$true` the launcher looks up which window hosts the instance — it walks up the process
+tree from the editor to the first ancestor that owns a window (WezTerm, Windows
+Terminal, Neovide) — and asks Windows to raise it, restoring it first if it is minimized.
+
+Best effort, and honest about its limit: one WezTerm or Windows Terminal process can
+host several windows and reports only one of them, so with several terminal windows open
+the raised one may not be the instance's own. It costs about 0.3–0.5 s (a process-tree
+lookup and a one-off compile), which is why it is opt-in. Any failure is silent and the
+file is opened regardless.
+
+## Config location
+
+The config lives next to the scripts: `%LOCALAPPDATA%\OpenInNvim\open-in-nvim.config.ps1`
+for an installed copy, the repository's own file for an in-place install
+([installation.md](installation.md)). `install.ps1` never overwrites an existing config
+unless you pass `-Force`.
 
 ## Environment switches
 

@@ -110,7 +110,7 @@ if (Test-Path -LiteralPath $Expanded) {
   $item = Get-Item -LiteralPath $Expanded
   if ($item.PSIsContainer) {
     # Folder target → start nvim in that directory
-    $Cwd = $item.FullName
+    $Cwd = ConvertTo-PlainDirPath $item.FullName
   } else {
     # File target → start nvim with file, cwd = parent folder
     $Cwd     = $item.Directory.FullName
@@ -120,7 +120,7 @@ if (Test-Path -LiteralPath $Expanded) {
   # Non-existing path → treat parent as cwd and pass literal path to create a new file
   $parent = Split-Path -Path $Expanded -Parent
   if ($parent -and (Test-Path -LiteralPath $parent)) {
-    $Cwd = (Get-Item -LiteralPath $parent).FullName
+    $Cwd = ConvertTo-PlainDirPath (Get-Item -LiteralPath $parent).FullName
   }
   $FileArg = $Expanded
 }

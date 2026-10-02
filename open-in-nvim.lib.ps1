@@ -224,6 +224,8 @@ function Invoke-NvimRpc {
   param([string]$Pipe, [string]$Method, [object[]]$Params = @(), [int]$TimeoutMs = 800)
 
   $res = [pscustomobject]@{ Connected = $false; Ok = $false; Result = $null; Error = $null }
+  # Connect() waits for the whole timeout for a pipe that does not exist; looking first costs milliseconds.
+  if (-not (Test-NvimPipe $Pipe)) { return $res }
   $name = $Pipe -replace '^\\\\\.\\pipe\\', ''
   $client = $null
   try {
@@ -452,4 +454,110 @@ function Invoke-Spawn {
   # Console, not the output stream: the caller's return value would swallow the line.
   if ($env:OPEN_IN_NVIM_SPAWN_DRYRUN) { [Console]::Out.WriteLine('spawn: ' + $FilePath + ' ' + $line); return }
   Start-Process -FilePath $FilePath -ArgumentList $line | Out-Null
+}
+
+# ---------------------------------------------------------------------------------------------
+# Bring the editor's window to the front (opt-in: FOCUS_TERMINAL)
+# ---------------------------------------------------------------------------------------------
+
+function Find-WindowOwnerPid {
+  <#
+    .SYNOPSIS
+      Walk up the process tree from a process and return the first ancestor that owns a window.
+    .PARAMETER ParentOf
+      Hashtable process id -> parent process id.
+    .PARAMETER HasWindow
+      Script block taking a process id and returning $true when that process owns a window.
+    .RETURNS
+      The ancestor's process id, or $null (no window found, loop, or the tree ends).
+    .NOTES
+      A TUI session is nvim.exe (core) -> nvim.exe (UI client) -> shell -> terminal host; the window
+      belongs to the terminal host (WezTerm, Windows Terminal) or to a GUI such as Neovide.
+  #>
+  param([int]$StartPid, [hashtable]$ParentOf, [scriptblock]$HasWindow, [int]$MaxDepth = 12)
+  $seen = @{}
+  $cur = $StartPid
+  for ($i = 0; $i -lt $MaxDepth; $i++) {
+    if (-not $ParentOf.ContainsKey($cur)) { return $null }
+    $cur = [int]$ParentOf[$cur]
+    if ($cur -le 0 -or $seen.ContainsKey($cur)) { return $null }
+    $seen[$cur] = $true
+    if (& $HasWindow $cur) { return $cur }
+  }
+  return $null
+}
+
+function Initialize-OpenInNvimWin32 {
+  if ('OpenInNvim.Win32' -as [type]) { return }
+  Add-Type -Namespace OpenInNvim -Name Win32 -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint processId);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+'@
+}
+
+function Set-WindowForeground {
+  <#
+    .SYNOPSIS
+      Restore (if minimized) and raise a window. True when Windows accepted the request.
+    .NOTES
+      Windows only lets the foreground process hand the foreground over. Attaching this thread's input
+      to the foreground window's thread for the call is the usual way around that without sending keys.
+  #>
+  param([IntPtr]$Hwnd)
+  Initialize-OpenInNvimWin32
+  if ([OpenInNvim.Win32]::IsIconic($Hwnd)) { [void][OpenInNvim.Win32]::ShowWindow($Hwnd, 9) }   # SW_RESTORE
+  $fg = [OpenInNvim.Win32]::GetForegroundWindow()
+  $fgPid = [uint32]0
+  $fgThread = [OpenInNvim.Win32]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+  $me = [OpenInNvim.Win32]::GetCurrentThreadId()
+  $attached = $false
+  if ($fgThread -ne 0 -and $fgThread -ne $me) { $attached = [OpenInNvim.Win32]::AttachThreadInput($me, $fgThread, $true) }
+  try { return [OpenInNvim.Win32]::SetForegroundWindow($Hwnd) }
+  finally { if ($attached) { [void][OpenInNvim.Win32]::AttachThreadInput($me, $fgThread, $false) } }
+}
+
+function Set-NvimInstanceFocus {
+  <#
+    .SYNOPSIS
+      Raise the window that hosts the instance behind a pipe. Best effort: any failure returns $false.
+    .NOTES
+      A terminal host with several windows (one Windows Terminal or WezTerm process) reports only one of
+      them, so with several windows open the raised one may not be the instance's own.
+  #>
+  param([string]$Pipe)
+  try {
+    $nvimPid = Invoke-NvimEval -Pipe $Pipe -Expr 'getpid()'
+    if (-not $nvimPid) { return $false }
+    $map = @{}
+    foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId -ErrorAction Stop)) {
+      $map[[int]$p.ProcessId] = [int]$p.ParentProcessId
+    }
+    $owner = Find-WindowOwnerPid -StartPid ([int]$nvimPid) -ParentOf $map -HasWindow {
+      param($procId)
+      $pr = Get-Process -Id $procId -ErrorAction SilentlyContinue
+      return [bool]($pr -and $pr.MainWindowHandle -ne [IntPtr]::Zero)
+    }
+    if (-not $owner) { return $false }
+    return (Set-WindowForeground ((Get-Process -Id $owner).MainWindowHandle))
+  } catch {
+    return $false
+  }
+}
+
+function ConvertTo-PlainDirPath {
+  <#
+    .SYNOPSIS
+      A folder path without trailing separators ("C:\dir\" -> "C:\dir"); a drive root such as "C:\" is kept.
+    .NOTES
+      Get-Item keeps the trailing backslash of what it was given, and Explorer can hand one over.
+  #>
+  param([string]$Path)
+  $p = $Path
+  while ($p.Length -gt 3 -and ($p.EndsWith('\') -or $p.EndsWith('/'))) { $p = $p.Substring(0, $p.Length - 1) }
+  return $p
 }

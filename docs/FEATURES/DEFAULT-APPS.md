@@ -33,8 +33,10 @@ changes what a double-click does without going through Settings; the per-extensi
 `UserChoice` keys are never written (Windows protects them), so **Settings → Apps →
 Default apps** has the last word.
 
-The VBS files that the exes call still run the scripts at `C:\tools\OpenInNvim`, so the
-junction from [../installation.md](../installation.md) is needed here too.
+The VBS files that the exes call run the `.ps1` files next to them, and
+`deploy-open-in-nvim.ps1` copies those along (the config only when absent). Running
+`install.ps1` first, into the same default folder, gives the exes a ready config with the
+detected `nvim.exe`.
 
 ## Checking the registration
 

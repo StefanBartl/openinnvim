@@ -30,4 +30,9 @@ $Cfg = [ordered]@{
   #   'filetree' = point filetree.nvim at the folder (:Filetree open <dir>) if the instance has it,
   #   'edit'     = always cd + directory view (:edit .).
   FOLDER_OPENS_IN = 'filetree'
+
+  # $true: after opening, bring the window that hosts the instance to the front (best effort; costs about
+  # 0.3-0.5 s for a process-tree lookup and a one-off compile). With several windows in one terminal
+  # process (one Windows Terminal, one WezTerm) the raised window may not be the instance's own.
+  FOCUS_TERMINAL = $false
 }

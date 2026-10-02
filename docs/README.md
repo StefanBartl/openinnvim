@@ -8,7 +8,7 @@ is the short version of all of it.
 | Page | Answers |
 | --- | --- |
 | [requirements.md](requirements.md) | Which Windows, PowerShell and Neovim versions, which terminal starts a new instance, and what is optional |
-| [installation.md](installation.md) | The junction, the six registry entries `install-context.ps1` writes, and how to remove them again |
+| [installation.md](installation.md) | `install.ps1`: what it copies, writes and registers, installing in place for development, and `uninstall.ps1` |
 | [quickstart.md](quickstart.md) | The first click, and how to see what the launcher would do without opening anything |
 | [configuration.md](configuration.md) | Every key in `open-in-nvim.config.ps1` and every environment switch, with defaults |
 | [BINDINGS.md](BINDINGS.md) | The context-menu entries, the registry command behind each, and the diagnostic switches |

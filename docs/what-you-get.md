@@ -19,6 +19,9 @@ Without configuring anything beyond the path to `nvim.exe`:
   directory with a directory view otherwise.
 - **A fallback that does what you asked.** With no running instance, a new terminal
   (WezTerm, Windows Terminal or `cmd`) starts Neovim with the file.
+- **One-script install and uninstall.** `install.ps1` finds Neovim, copies the files and
+  registers the six entries; `uninstall.ps1` removes them again, and only the files it
+  copied.
 - **Hidden, safe, local.** No console flash; the launchers talk only to Neovim
   instances of your own Windows session.
 - **A test suite that cannot touch your session.** Its checks run against throw-away

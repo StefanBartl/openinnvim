@@ -14,13 +14,13 @@ folder; otherwise the folder becomes the working directory with a directory view
 
 ```powershell
 $env:OPEN_IN_NVIM_DRYRUN = '1'
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\tools\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File $env:LOCALAPPDATA\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
 ```
 
 It prints the instances it would try, in order:
 
 ```
-candidate: \\.\pipe\nvim-bartl
+candidate: \\.\pipe\nvim-<USER>
 candidate: \\.\pipe\nvim.52328.0
 ```
 

@@ -9,13 +9,14 @@ the links from the end:
    swallows:
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File C:\tools\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
+   powershell -NoProfile -ExecutionPolicy Bypass -File $env:LOCALAPPDATA\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
    ```
 
-2. **Does the junction resolve?** `Test-Path C:\tools\OpenInNvim\open-in-nvim-current.ps1`
-   must be `True`. A junction left behind after the repository moved is the classic
-   cause: the registry entries are fine, the target is gone. Recreate it —
-   [installation.md](installation.md).
+2. **Is the folder in the entry still there?** The command (see
+   [BINDINGS.md](BINDINGS.md#checking-the-live-state)) names the install folder; if that folder
+   was moved or deleted, the entry is fine and its target is gone. Run `install.ps1` again —
+   [installation.md](installation.md). An old setup that still points at a junction
+   `C:\tools\OpenInNvim` fails the same way when the repository moves.
 3. **Is Neovim found?** Set `NVIM_BIN` in `open-in-nvim.config.ps1`, or put `nvim` on
    `PATH`. The new-instance entry shows a popup with `OPEN_IN_NVIM_DEBUG=1`; the current-instance one
    prints an error when run directly (step 1).
@@ -28,7 +29,7 @@ Print the order the launcher would use:
 
 ```powershell
 $env:OPEN_IN_NVIM_DRYRUN = '1'
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\tools\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File $env:LOCALAPPDATA\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
 ```
 
 The first candidate wins. Then:

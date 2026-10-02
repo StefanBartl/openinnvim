@@ -32,7 +32,7 @@ line, so folders with spaces and a drive root (`C:\`) survive.
 
 ```powershell
 $env:OPEN_IN_NVIM_SPAWN_DRYRUN = '1'
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\tools\OpenInNvim\open-in-nvim.ps1 "$env:USERPROFILE\Desktop\test.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File $env:LOCALAPPDATA\OpenInNvim\open-in-nvim.ps1 "$env:USERPROFILE\Desktop\test.txt"
 ```
 
 prints one line starting with `spawn:`.
