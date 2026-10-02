@@ -9,6 +9,9 @@
   reachable.
 - Starts new instances in WezTerm, Windows Terminal or `cmd.exe`, whichever exists
   first.
+- Installs and removes itself: `install.ps1` copies the files, writes the config and
+  registers the entries, `uninstall.ps1` takes them out again.
+- Optionally brings the instance's window to the front after opening (`FOCUS_TERMINAL`).
 - Optionally registers Neovim as the default application for many file types, through
   two small exe launchers ([FEATURES/DEFAULT-APPS.md](FEATURES/DEFAULT-APPS.md)).
 

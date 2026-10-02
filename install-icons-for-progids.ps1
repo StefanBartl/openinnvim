@@ -73,7 +73,7 @@ function Set-ProgIdIconAndMetadata {
     $capPath = "HKCU:\Software\$ProgId\Capabilities"
     New-Item -Path $capPath -Force | Out-Null
     New-ItemProperty -Path $capPath -Name 'ApplicationName' -Value $DisplayName -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $capPath -Name 'ApplicationDescription' -Value 'Texteditor basierend auf Neovim' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $capPath -Name 'ApplicationDescription' -Value 'Text editor based on Neovim' -PropertyType String -Force | Out-Null
 
     # Ensure FileAssociations subkey exists (values left to caller / Settings UI)
     $fileAssoc = "$capPath\FileAssociations"
@@ -100,8 +100,8 @@ Write-Host "Verify with (PowerShell):"
 Write-Host "  Get-ItemProperty -Path 'HKCU:\Software\Classes\$progIdNew\DefaultIcon'"
 Write-Host "  Get-ItemProperty -Path 'HKCU:\Software\Classes\$progIdCurrent\DefaultIcon'"
 Write-Host ""
-Write-Host "Hinweis: Falls Settings weiterhin 'Windows Based Script Host' anzeigt, die App einmal manuell in"
-Write-Host "Einstellungen -> Apps -> Standard-Apps auswählen oder Explorer neu starten."
+Write-Host "Note: if Settings still shows 'Windows Based Script Host', pick the app once manually in"
+Write-Host "Settings -> Apps -> Default apps, or restart Explorer."
 Write-Host ""
 Write-Host "Optional: Restart Explorer to clear some icon caching (admin not required for HKCU changes):"
 Write-Host "  Stop-Process -Name explorer -Force"

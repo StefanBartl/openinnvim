@@ -1,6 +1,6 @@
 # verify.ps1
-# Verifiziert beide Kontext-Workflows End-to-End (VBS -> PS1 -> nvim).
-# Es wird je eine Datei und ein Ordner getestet.
+# Verifies both context-menu workflows end to end (VBS -> PS1 -> nvim).
+# One file and one folder are tested for each.
 
 param(
   [string]$FileTarget = "$env:USERPROFILE\Desktop\openin-test.txt",
@@ -32,4 +32,4 @@ wscript.exe //nologo "$VbsCurrent" "$FileTarget"
 Write-Host "Test 4/4: CURRENT instance, directory..."
 wscript.exe //nologo "$VbsCurrent" "$DirTarget"
 
-Write-Host "Verify durchgelaufen. Falls keine Fenster: NVIM_BIN/WEZTERM_BIN prüfen oder OPEN_IN_NVIM_DEBUG=1 setzen."
+Write-Host "Verify finished. If no windows appeared: check NVIM_BIN/WEZTERM_BIN or set OPEN_IN_NVIM_DEBUG=1."

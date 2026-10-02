@@ -102,7 +102,7 @@ function Ensure-ProgId {
     $capKey = "HKCU:\Software\$ProgId\Capabilities"
     New-Item -Path $capKey -Force | Out-Null
     New-ItemProperty -Path $capKey -Name 'ApplicationName' -Value $DisplayName -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $capKey -Name 'ApplicationDescription' -Value 'Texteditor basierend auf Neovim' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $capKey -Name 'ApplicationDescription' -Value 'Text editor based on Neovim' -PropertyType String -Force | Out-Null
 
     # Ensure RegisteredApplications entry
     $regApps = 'HKCU:\Software\RegisteredApplications'

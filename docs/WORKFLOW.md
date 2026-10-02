@@ -30,6 +30,15 @@ predictable:
 - **Look at the order first.** `OPEN_IN_NVIM_DRYRUN=1` prints the instances in the
   order they would be tried — see [quickstart.md](quickstart.md).
 
+## Does the window come forward?
+
+Windows does not let a background process raise a window, so after a click the editor may
+have opened the file behind whatever you were looking at. If that bothers you, turn on
+`FOCUS_TERMINAL` ([configuration.md](configuration.md#focus_terminal)): the launcher then
+raises the terminal window that hosts the instance. It is off by default because it costs
+a few hundred milliseconds and, with several windows in one terminal process, can raise
+the wrong one.
+
 ## Folders
 
 A folder click is a "go here" gesture, not "edit this". With filetree.nvim in the

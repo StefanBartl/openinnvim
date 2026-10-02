@@ -1,6 +1,6 @@
 # Quickstart
 
-With Neovim running, right-click a file in Explorer, choose **Show more options**
+After [installing](installation.md) (one script), with Neovim running, right-click a file in Explorer, choose **Show more options**
 (Windows 11), then **Open with Neovim (current instance)**. The file appears in the
 session you were working in — no new window.
 

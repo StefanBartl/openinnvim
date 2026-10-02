@@ -41,6 +41,13 @@ The first candidate wins. Then:
   `:echo len(nvim_list_uis())` is 1 or more for a session the launcher can use.
 - Instances of another Windows user are never offered.
 
+## The file opened, but behind another window
+
+Windows only lets the foreground process raise a window. Turn on `FOCUS_TERMINAL` in the
+config ([configuration.md](configuration.md#focus_terminal)). With several windows in one
+WezTerm or Windows Terminal process it can raise a different window of that process than
+the instance's own; that is a limit of how the window is found, not a setting.
+
 ## A new instance was started although Neovim is running
 
 The launcher found no instance it could talk to. Check, in the running Neovim:
