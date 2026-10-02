@@ -82,9 +82,17 @@ Open with Neovim (new instance)
  Es wird stets eine neue Neovim-Instanz gestartet.
 
 Open with Neovim (current instance)
-- Kandidatenliste für Serveradresse: NVIM_SERVER (falls gesetzt) → nvr --serverlist (falls nvr installiert) → Heuristik \\.\pipe\nvim-%USERNAME%
-- Wenn erreichbar: An bestehende Instanz per nvr --remote oder nvim --remote/--remote-send anbinden.
+- Kandidatenliste für Serveradresse, in dieser Reihenfolge:
+  1. NVIM_SERVER (falls gesetzt)
+  2. fester Pipe-Name \\.\pipe\nvim-%USERNAME% (falls vorhanden und PREFER_STABLE_PIPE nicht $false)
+  3. alle laufenden Instanzen über ihre Standard-Pipe \\.\pipe\nvim.<pid>.<n> (gibt es in jeder Neovim-Sitzung ohne
+     Konfiguration; `--headless`-Hilfsprozesse und `-l`-Skripte werden ausgefiltert), sortiert nach INSTANCE_PICK
+     (newest/oldest/ask)
+  4. nvr --serverlist (nur als letzte Möglichkeit, nvr hängt unter Windows an Pipes)
+- Wenn erreichbar: An die Instanz per nvim --server <pipe> --remote / --remote-send anbinden (jeder Aufruf mit Zeitlimit).
 - Wenn nicht erreichbar: Neue Instanz mit --listen <Adresse> starten und Ziel öffnen.
+- Unter Windows besteht eine Terminal-Sitzung aus zwei Prozessen (sichtbares nvim.exe und dessen `--embed`-Kern); die Pipe
+  gehört dem Kern, deshalb wird nach Pipes gesucht und nicht nach der PID des Fensters.
 
 ## Schneller Test
 
@@ -110,6 +118,17 @@ wscript //nologo "C:\tools\OpenInNvim\open-in-nvim-current.vbs" "%USERPROFILE%\D
   - In Neovim :echo v:servername prüfen.
   - Mit nvr --serverlist Verfügbarkeit prüfen (falls nvr installiert).
   - Optional init.lua so konfigurieren, dass serverstart('\\.\pipe\nvim-%USERNAME%') beim Start gesetzt wird.
+
+## Tests
+
+Die Tests starten eigene Wegwerf-Instanzen und berühren nie eine laufende Sitzung (PID-Einschränkung über
+`OPEN_IN_NVIM_ONLY_PIDS`, gefälschter `USERNAME`). Windows PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
+```
+
+Diagnose ohne etwas zu öffnen: `OPEN_IN_NVIM_DRYRUN=1` gibt die geordnete Kandidatenliste aus.
 
 ## Deinstallation
 

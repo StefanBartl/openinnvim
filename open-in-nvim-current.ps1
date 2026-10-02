@@ -35,6 +35,19 @@ if (Test-Path -LiteralPath $CfgPath) {
   }
 }
 
+# Instance discovery helpers (default-pipe scan, chooser). Optional: without the file the script
+# falls back to nvr and the per-user pipe name below.
+$LibPath = Join-Path -Path $Here -ChildPath 'open-in-nvim.lib.ps1'
+$HaveLib = Test-Path -LiteralPath $LibPath
+if ($HaveLib) { . $LibPath }
+
+# Read an optional setting from $Cfg; older config files do not have the newer keys.
+function Get-CfgValue {
+  param([string]$Key, $Default)
+  if ($Cfg.Contains($Key) -and $null -ne $Cfg[$Key] -and "$($Cfg[$Key])" -ne '') { return $Cfg[$Key] }
+  return $Default
+}
+
 # ---------------------------
 # 2) Helpers
 # ---------------------------
@@ -90,19 +103,21 @@ function Build-RemoteEditCommand {
   #>
   param([string]$cwd, [string]$file)
 
+  # Every command is :silent. ":cd" echoes the new directory, and a path wider than the window
+  # raises a hit-enter prompt that leaves the instance waiting for a key.
   $parts = @()
 
   if ($cwd -and $cwd -ne '') {
-    # :execute 'cd ' . fnameescape('<cwd>')
-    $parts += (":execute 'cd ' . fnameescape('" + (Escape-For-VimSingleQuote $cwd) + "')")
+    # :silent execute 'cd ' . fnameescape('<cwd>')
+    $parts += (":silent execute 'cd ' . fnameescape('" + (Escape-For-VimSingleQuote $cwd) + "')")
   }
 
   if ($file -and $file -ne '') {
-    # :execute 'edit ' . fnameescape('<file>')
-    $parts += (":execute 'edit ' . fnameescape('" + (Escape-For-VimSingleQuote $file) + "')")
+    # :silent execute 'edit ' . fnameescape('<file>')
+    $parts += (":silent execute 'edit ' . fnameescape('" + (Escape-For-VimSingleQuote $file) + "')")
   } else {
     # No file -> open a directory view in the current cwd
-    $parts += ":edit ."
+    $parts += ":silent edit ."
   }
 
   return "<C-\><C-n>" + ($parts -join " | ") + "<CR>"
@@ -152,6 +167,8 @@ if (Test-Path -LiteralPath $Expanded) {
     $Cwd = (Get-Item -LiteralPath $parent).FullName
   }
   $FileArg = $Expanded  # allow creating a new file remotely
+  # An unrooted name starting with '-' would be parsed as an option by --remote.
+  if (-not [IO.Path]::IsPathRooted($FileArg)) { $FileArg = Join-Path -Path $Cwd -ChildPath $FileArg }
 }
 
 # ---------------------------
@@ -164,7 +181,35 @@ if ($Cfg.NVIM_SERVER -and $Cfg.NVIM_SERVER -ne '') {
   [void]$candidates.Add($Cfg.NVIM_SERVER)
 }
 
-# 5.2 discover via nvr --serverlist (if available)
+# 5.2 a stable per-user pipe (nvim-<USERNAME>) pins the "main" instance when the user's own config
+# creates it (serverstart). Preferred while it exists; PREFER_STABLE_PIPE = $false skips it.
+$StablePipe = "\\.\pipe\nvim-$env:USERNAME"
+if ($HaveLib -and (Get-CfgValue 'PREFER_STABLE_PIPE' $true) -and (Test-NvimPipe $StablePipe)) {
+  if (-not $candidates.Contains($StablePipe)) { [void]$candidates.Add($StablePipe) }
+}
+
+# 5.3 every running Neovim exposes \\.\pipe\nvim.<pid>.<n> without any configuration. Headless helper
+# processes are filtered out. INSTANCE_PICK: newest (default) | oldest | ask.
+if ($HaveLib) {
+  $onlyPids = @()
+  if ($env:OPEN_IN_NVIM_ONLY_PIDS) {
+    # Debugging/test aid: restrict discovery to a comma separated PID list.
+    $onlyPids = @($env:OPEN_IN_NVIM_ONLY_PIDS -split '[,; ]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+  }
+  $pick = [string](Get-CfgValue 'INSTANCE_PICK' 'newest')
+  $found = Select-NvimInstance -Instances @(Get-NvimInstances -OnlyPids $onlyPids) -Pick $pick
+  if ($pick -eq 'ask' -and $found.Count -gt 1 -and -not $env:OPEN_IN_NVIM_DRYRUN) {
+    $chosen = Show-NvimChooser -Instances $found
+    if (-not $chosen) { exit 0 }                       # dialog cancelled
+    if (-not $candidates.Contains($chosen)) { [void]$candidates.Add($chosen) }
+  } else {
+    foreach ($inst in $found) {
+      if (-not $candidates.Contains($inst.Pipe)) { [void]$candidates.Add($inst.Pipe) }
+    }
+  }
+}
+
+# 5.4 discover via nvr --serverlist (if available)
 if ($NVR) {
   try {
     $out = & $NVR --serverlist 2>$null
@@ -181,27 +226,44 @@ if ($NVR) {
   }
 }
 
-# 5.3 fallback: per-user pipe (matches common init.lua pattern)
+# 5.5 fallback: per-user pipe (matches common init.lua pattern)
 if ($candidates.Count -eq 0) {
-  [void]$candidates.Add("\\.\pipe\nvim-$env:USERNAME")
+  [void]$candidates.Add($StablePipe)
+}
+
+# Diagnostics: OPEN_IN_NVIM_DRYRUN=1 prints the ordered candidates and exits without opening anything.
+if ($env:OPEN_IN_NVIM_DRYRUN) {
+  foreach ($c in $candidates) { Write-Output ('candidate: ' + $c) }
+  exit 0
 }
 
 # ---------------------------
 # 6) Try to open via nvr (preferred) or raw nvim --remote-send
 # ---------------------------
-function Try-Open-With-Nvr {
-  param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
-  if (-not $NVR) { return $false }
-
-  if ($isDir) {
-    # Build a safe :cd + :edit . command and send keys
-    $keys = Build-RemoteEditCommand -cwd $cwd -file $null
-    & $NVR --servername $server --remote-send $keys | Out-Null
-  } else {
-    # For files prefer --remote to reuse window/tab logic in the server
-    & $NVR --servername $server --remote -- $fileArg | Out-Null
+function Invoke-Bounded {
+  <#
+    .SYNOPSIS
+      Run an external program with a time limit and no window.
+    .RETURNS
+      The exit code, or $null when the limit was hit (the process tree is then killed by its own PID).
+    .NOTES
+      Both nvr (which hangs on Windows pipes) and nvim --remote against a busy or hung instance can
+      block forever. This script runs hidden, so a hang would be invisible and never end.
+  #>
+  param([string]$Exe, [string[]]$ArgList, [int]$TimeoutMs = 5000)
+  $q = @()
+  foreach ($a in $ArgList) { $q += (Quote-Arg $a) }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $Exe
+  $psi.Arguments = ($q -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  if (-not $proc.WaitForExit($TimeoutMs)) {
+    & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+    return $null
   }
-  return ($LASTEXITCODE -eq 0)
+  return $proc.ExitCode
 }
 
 function Try-Open-With-NvimRemote {
@@ -209,23 +271,40 @@ function Try-Open-With-NvimRemote {
 
   if ($isDir) {
     $keys = Build-RemoteEditCommand -cwd $cwd -file $null
-    & $NVIM --server $server --remote-send $keys | Out-Null
-    return ($LASTEXITCODE -eq 0)
-  } else {
-    # Prefer --remote for files if supported by this nvim build; otherwise remote-send a command.
-    & $NVIM --server $server --remote -- $fileArg | Out-Null
-    if ($LASTEXITCODE -eq 0) { return $true }
-
-    # Fallback: :execute 'cd …' | edit <file>
-    $keys = Build-RemoteEditCommand -cwd $cwd -file $fileArg
-    & $NVIM --server $server --remote-send $keys | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
+    return ($rc -eq 0)
   }
+
+  # Prefer --remote for files if supported by this nvim build; otherwise remote-send a command.
+  # No "--" before the path: Neovim takes it literally and opens a buffer named "--" (exit code 2).
+  # $fileArg is always an absolute path here, so it cannot be mistaken for an option.
+  $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote', $fileArg)
+  if ($rc -eq 0) { return $true }
+  if ($null -eq $rc) { return $false }   # timed out: the instance does not answer, try the next one
+
+  # Fallback: :execute 'cd ...' | edit <file>
+  $keys = Build-RemoteEditCommand -cwd $cwd -file $fileArg
+  $rc = Invoke-Bounded -Exe $NVIM -ArgList @('--server', $server, '--remote-send', $keys)
+  return ($rc -eq 0)
+}
+
+function Try-Open-With-Nvr {
+  # Last resort only. --nostart: never let nvr launch an editor of its own when it cannot connect.
+  param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
+  if (-not $NVR) { return $false }
+
+  if ($isDir) {
+    $keys = Build-RemoteEditCommand -cwd $cwd -file $null
+    $rc = Invoke-Bounded -Exe $NVR -ArgList @('--nostart', '--servername', $server, '--remote-send', $keys)
+  } else {
+    $rc = Invoke-Bounded -Exe $NVR -ArgList @('--nostart', '--servername', $server, '--remote', $fileArg)
+  }
+  return ($rc -eq 0)
 }
 
 foreach ($srv in $candidates) {
-  if (Try-Open-With-Nvr -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { exit 0 }
   if (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { exit 0 }
+  if (Try-Open-With-Nvr -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { exit 0 }
 }
 
 # ---------------------------
@@ -239,12 +318,15 @@ function Start-With-WezTerm {
   param([string]$cwd, [string[]]$args)
   $wezPref = $Cfg.WEZTERM_BIN
   if ($wezPref -and (Test-Path -LiteralPath $wezPref)) {
-    Start-Process -FilePath $wezPref -ArgumentList @('start','--cwd', $cwd, '--', $NVIM) + $args | Out-Null
+    # Build the list first: "-ArgumentList @(...) + $args" parses "+" as a second positional argument.
+    $argList = @('start','--cwd', $cwd, '--', $NVIM) + $args
+    Start-Process -FilePath $wezPref -ArgumentList $argList | Out-Null
     return $true
   }
   $wezCmd = Get-Command -Name 'wezterm' -ErrorAction SilentlyContinue
   if ($wezCmd) {
-    Start-Process -FilePath $wezCmd.Source -ArgumentList @('start','--cwd', $cwd, '--', $NVIM) + $args | Out-Null
+    $argList = @('start','--cwd', $cwd, '--', $NVIM) + $args
+    Start-Process -FilePath $wezCmd.Source -ArgumentList $argList | Out-Null
     return $true
   }
   return $false
@@ -255,7 +337,8 @@ function Start-With-WindowsTerminal {
   $wtCmd = Get-Command -Name 'wt' -ErrorAction SilentlyContinue
   if ($wtCmd) {
     $wt = $wtCmd.Source
-    Start-Process -FilePath $wt -ArgumentList @('-w','0','nt','-d', $cwd, '--', $NVIM) + $args | Out-Null
+    $argList = @('-w','0','nt','-d', $cwd, '--', $NVIM) + $args
+    Start-Process -FilePath $wt -ArgumentList $argList | Out-Null
     return $true
   }
   return $false

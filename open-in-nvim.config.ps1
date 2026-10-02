@@ -13,4 +13,14 @@ $Cfg = [ordered]@{
   # Stabile Serveradresse für "current instance".
   # Leer lassen, wenn die Auto-Discovery (nvr --serverlist) oder die Heuristik \\.\pipe\nvim-%USERNAME% verwendet werden soll.
   NVIM_SERVER = ''
+
+  # Fester Pipe-Name \\.\pipe\nvim-%USERNAME% (falls die eigene init.lua ihn mit serverstart() anlegt) hat Vorrang.
+  # $false: den festen Namen überspringen und nur die laufenden Instanzen betrachten.
+  PREFER_STABLE_PIPE = $true
+
+  # Welche laufende Instanz zuerst probiert wird, wenn mehrere da sind (jede Neovim-Sitzung hat ohne
+  # Konfiguration eine Pipe \\.\pipe\nvim.<pid>.<n>; --headless-Hilfsprozesse werden ignoriert):
+  #   'newest' = zuletzt gestartete (Standard), 'oldest' = am längsten laufende,
+  #   'ask'    = Auswahlfenster mit Arbeitsverzeichnis und Datei jeder Instanz.
+  INSTANCE_PICK = 'newest'
 }
