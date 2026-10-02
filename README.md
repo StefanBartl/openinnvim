@@ -1,172 +1,64 @@
-# OpenInNvim
+> **Beta stage — active development.** This repository is past its first shape and in
+> active use, but the surface is not frozen: breaking changes are still possible. Pin a
+> commit or tag if you depend on it.
 
-Zwei Windows-Explorer-Kontextmenüeinträge für Neovim:
-- Open with Neovim (new instance)
-- Open with Neovim (current instance)
+# openinnvim
 
-**Architektur:** Explorer → VBS (unsichtbar) → PowerShell → nvim
-Kompatibel mit Windows PowerShell 5.1.
-
-## Link setzen (Junction)
-
-**PowerShell:**
-
-```powershell
-New-Item -ItemType Junction -Path 'C:\tools\OpenInNvim' -Target 'E:\repos\openinnvim'
+```
+ ██████╗ ██████╗ ███████╗███╗   ██╗██╗███╗   ██╗███╗   ██╗██╗   ██╗██╗███╗   ███╗
+██╔═══██╗██╔══██╗██╔════╝████╗  ██║██║████╗  ██║████╗  ██║██║   ██║██║████╗ ████║
+██║   ██║██████╔╝█████╗  ██╔██╗ ██║██║██╔██╗ ██║██╔██╗ ██║██║   ██║██║██╔████╔██║
+██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║██║██║╚██╗██║██║╚██╗██║╚██╗ ██╔╝██║██║╚██╔╝██║
+╚██████╔╝██║     ███████╗██║ ╚████║██║██║ ╚████║██║ ╚████║ ╚████╔╝ ██║██║ ╚═╝ ██║
+ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝  ╚═══╝  ╚═╝╚═╝     ╚═╝
 ```
 
-Eine Junction braucht weder Administratorrechte noch den Entwicklermodus (anders als ein Symlink).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Neovim](https://img.shields.io/badge/Neovim-0.10%2B-57A143?logo=neovim&logoColor=white)](https://neovim.io)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE?logo=powershell&logoColor=white)](https://learn.microsoft.com/powershell/)
+![Status](https://img.shields.io/badge/status-beta-orange)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
-## Ziele
+> Folders open in the tree of [filetree.nvim](https://github.com/StefanBartl/filetree.nvim) when
+> the running session has it — see [Around it](docs/around-it.md).
 
-- Sauber getrennte Workflows: „new“ und „current“
-- Zentrale Konfiguration der Pfade (nvim, optional wezterm, optionale Serveradresse)
-- Robustes Pfad-/Quoting-Handling (Leerzeichen, neue Dateien)
-- Keine Plugins zwingend erforderlich; optional nvr für Komfort
-
-## Verzeichnisstruktur
-
-**Physische Ablage (dieses Repo):**
-`E:\repos\openinnvim`
-
-**Kompatibilitätslink für Registry (Junction):**
-`C:\tools\OpenInNvim  →  E:\repos\openinnvim`
-
-**Inhalt:**
-C:\tools\OpenInNvim\
-  open-in-nvim.vbs
-  open-in-nvim.ps1
-  open-in-nvim-current.vbs
-  open-in-nvim-current.ps1
-  open-in-nvim.config.ps1
-  open-in-nvim.lib.ps1        (gemeinsame Helfer, Pflicht für beide Launcher)
-  install-context.ps1
-  remove-old.reg
-  verify.ps1
-
-## Installation
-
-1) Dateien ablegen
-   Dieses Repo (`E:\repos\openinnvim`) verwalten und die Junction nach `C:\tools\OpenInNvim` setzen.
-
-2) Kontextmenü einrichten
-   Variante A (Skript):
-     `powershell -ExecutionPolicy Bypass -File "C:\tools\OpenInNvim\install-context.ps1"`
-   Variante B (.reg):
-     remove-old.reg importieren, danach eigene .reg-Dateien für „new“/„current“ importieren (optional; Skript bevorzugt).
-
-3) Explorer neu starten
-   taskkill /F /IM explorer.exe
-   explorer.exe
-
-## Konfiguration
-
-Datei: open-in-nvim.config.ps1
-
-### Zentrale Konfiguration für beide Einträge
-
-```ps1
-$Cfg = [ordered]@{
-  NVIM_BIN    = 'C:\Program Files\Neovim\bin\nvim.exe'
-  WEZTERM_BIN = "$env:LOCALAPPDATA\wezterm\wezterm-gui.exe"
-  NVIM_SERVER = ''   # leer = Auto-Discovery (nvr --serverlist) oder \\.\pipe\nvim-%USERNAME%
-}
-```
-
-Bei Scoop/Winget/Portable NVIM_BIN anpassen. NVIM_SERVER kann leer bleiben, wenn eine init.lua serverstart() nutzt oder nvr zur Discovery vorhanden ist.
-
-## Funktionsweise
-
-Open with Neovim (new instance)
- VBS startet PowerShell unsichtbar, PS-Startskript ermittelt Working Directory und Zielpfad.
- Startreihenfolge: WezTerm → Windows Terminal → cmd.exe „start“.
- Es wird stets eine neue Neovim-Instanz gestartet.
-
-Open with Neovim (current instance)
-- Kandidatenliste für Serveradresse, in dieser Reihenfolge:
-  1. NVIM_SERVER (falls gesetzt)
-  2. fester Pipe-Name \\.\pipe\nvim-%USERNAME% (falls vorhanden und PREFER_STABLE_PIPE nicht $false)
-  3. alle laufenden Instanzen über ihre Standard-Pipe \\.\pipe\nvim.<pid>.<n> (gibt es in jeder Neovim-Sitzung ohne
-     Konfiguration), sortiert nach INSTANCE_PICK (newest/oldest/ask). Es zählen nur Instanzen **mit angedocktem UI**
-     (`len(nvim_list_uis()) > 0`): `--headless`-Hilfsprozesse, `-l`-Skripte und neotests Kindprozess haben keins. Das ist
-     genauer und etwa 200 ms schneller als eine WMI-Abfrage der Kommandozeilen. Nur Instanzen der eigenen
-     Windows-Sitzung (nicht die eines anderen angemeldeten Benutzers).
-  4. nvr --serverlist (nur wenn nichts oben das Ziel genommen hat; nvr ist ein Python-Skript, startet langsam und
-     hängt unter Windows an Pipes, deshalb mit Zeitlimit)
-- Wenn erreichbar: Die Datei bzw. der Ordner wird **per RPC über die Pipe** übergeben (`:drop`, wie `nvim --remote`;
-  Ordner an `:Filetree open` bzw. cd + `:edit .`). Der Pfad geht als Parameter in ein kleines Lua-Stück und wird nie in
-  Befehlstext gesteckt, deshalb brauchen Leerzeichen, `#`, `%`, `[`, `'` oder `&` im Namen keine Sonderbehandlung. Es
-  startet kein zweites nvim.exe (das kostete etwa eine Sekunde), und eine Ablehnung kommt als Fehlermeldung zurück.
-  Nur für Adressen, die kein Pipe-Name sind (TCP), gilt der Rückweg über `nvim --server … --remote/--remote-send`
-  (jeder Aufruf mit Zeitlimit).
-- Wenn nicht erreichbar: Neue Instanz mit --listen <Adresse> starten (nur wenn der Pipe-Name nicht schon belegt ist)
-  und Ziel öffnen.
-- Unter Windows besteht eine Terminal-Sitzung aus zwei Prozessen (sichtbares nvim.exe und dessen `--embed`-Kern); die Pipe
-  gehört dem Kern, deshalb wird nach Pipes gesucht und nicht nach der PID des Fensters.
-
-## Schneller Test
-
-```powershell
-PowerShell direkt (new):
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\tools\OpenInNvim\open-in-nvim.ps1" "$env:USERPROFILE\Desktop\test.txt"
-
-PowerShell direkt (current):
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\tools\OpenInNvim\open-in-nvim-current.ps1" "$env:USERPROFILE\Desktop\test.txt"
-
-End-to-End via VBS:
-wscript //nologo "C:\tools\OpenInNvim\open-in-nvim.vbs" "%USERPROFILE%\Desktop\test.txt"
-wscript //nologo "C:\tools\OpenInNvim\open-in-nvim-current.vbs" "%USERPROFILE%\Desktop\test.txt"
-```
-
-## Troubleshooting
-
-- Beim Klick „passiert nichts“:
-  - Direkt testen (oben) und ggf. setx OPEN_IN_NVIM_DEBUG 1 setzen.
-  - NVIM_BIN in open-in-nvim.config.ps1 prüfen.
-  - WezTerm/Windows Terminal vorhanden? Sonst Fallback auf cmd.exe.
-- „current“ trifft keine Instanz:
-  - In Neovim :echo v:servername prüfen.
-  - Mit nvr --serverlist Verfügbarkeit prüfen (falls nvr installiert).
-  - Optional init.lua so konfigurieren, dass serverstart('\\.\pipe\nvim-%USERNAME%') beim Start gesetzt wird.
-
-## Tests
-
-Die Tests starten eigene Wegwerf-Instanzen und berühren nie eine laufende Sitzung (PID-Einschränkung über
-`OPEN_IN_NVIM_ONLY_PIDS`, gefälschter `USERNAME`). Windows PowerShell 5.1:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
-```
-
-Diagnose-Schalter (Umgebungsvariablen, nur für Tests und Fehlersuche):
-
-| Variable | Wirkung |
-| --- | --- |
-| `OPEN_IN_NVIM_DRYRUN=1` | gibt die geordnete Kandidatenliste aus, öffnet nichts |
-| `OPEN_IN_NVIM_SPAWN_DRYRUN=1` | gibt den Befehl aus, der eine neue Instanz starten würde, startet nichts |
-| `OPEN_IN_NVIM_NO_SPAWN=1` | startet nie ein Fenster; findet sich keine Instanz, Exit-Code 3 |
-| `OPEN_IN_NVIM_ONLY_PIDS=<pid,pid>` | nur diese Prozesse (ohne nvr und festen Pipe-Namen) |
-
-## Deinstallation
-
-- Kontextmenü entfernen: remove-old.reg importieren oder install-context.ps1 anpassen (nur Remove-Key-Aufrufe).
-- Junction entfernen (nur den Link, nie den Inhalt; `Remove-Item -Recurse` auf eine Junction kann in
-  Windows PowerShell 5.1 den Zielordner leeren):
-
-  ```powershell
-  [IO.Directory]::Delete('C:\tools\OpenInNvim', $false)
-  ```
-
-## Hinweise
-
-- WezTerm-Logs auf „ERROR“ kann man in der eigenen wezterm.lua auf log_info umstellen.
-- Für Ordner richtet „current“ standardmäßig `filetree.nvim` auf den Ordner (`:Filetree open <ordner>`), sofern die Instanz
-  den Befehl kennt; sonst (oder mit `FOLDER_OPENS_IN = 'edit'`) wird cd + Verzeichnisansicht (`:edit .`) benutzt.
-- Alle Befehle, die „current“ in die Sitzung schickt, laufen mit `:silent`: `:cd` gibt den Pfad aus, und ein Pfad, der
-  breiter als das Fenster ist, würde einen Hit-Enter-Prompt auslösen und die Instanz blockieren.
-- Windows PowerShell 5.1: ein deklarierter Funktionsparameter `$args` wird **nicht** gebunden (bleibt leer). Die
-  Launcher nennen ihn deshalb `$launchArgs`/`$nvimArgs`; ein leeres Element in `Start-Process -ArgumentList` wirft
-  außerdem einen Validierungsfehler (der `cmd start`-Rückweg übergibt den Fenstertitel deshalb als `""`).
-- Die Implementierung ist PS 5.1 kompatibel (keine ?. oder ?: Operatoren), Single-Responsibility und mit robuster Argument-Quotierung umgesetzt.
+Two Windows Explorer context-menu entries for Neovim: open a file or folder in a **new** instance,
+or hand it to the instance you are **already working in**. No Neovim plugin and no external tool
+are required.
 
 ---
+
+## Documentation
+
+Start at [docs/README.md](docs/README.md) — what's where, and which question
+each page answers.
+
+**The Basics**
+
+- [Requirements](docs/requirements.md) — Windows, PowerShell and Neovim versions, and the terminal that starts a new instance.
+- [Installation](docs/installation.md) — the junction, the six registry entries, and how to remove them again.
+- [Quickstart](docs/quickstart.md) — the first click, and how to see what the launcher would do without opening anything.
+
+**Configuration**
+
+- [What you get with the defaults](docs/what-you-get.md) — the things that matter on day one.
+- [All options](docs/configuration.md) — every key in `open-in-nvim.config.ps1` and every environment switch.
+- [Bindings](docs/BINDINGS.md) — the context-menu entries, what each registry key runs, and the switches.
+
+**The Rest**
+
+- [Features](docs/FEATURES/README.md) — one page per part: the current-instance launcher, the new-instance launcher, folders, the default-app launchers.
+- [Workflow](docs/WORKFLOW.md) — which entry to click when, and how several running instances are told apart.
+- [Around it](docs/around-it.md) — how this fits next to Neovim's own `--remote`, filetree.nvim and your `init.lua`.
+- [What it does and what not](docs/scope.md)
+- [Why it does it that way](docs/architecture.md) — RPC over the default pipe, the UI check, and the PowerShell 5.1 traps behind the code.
+- [Troubleshooting](docs/troubleshooting.md) — "nothing happens", wrong instance, folder does not open in the tree.
+- [Building the exe launchers](docs/building-launchers.md) — the optional .NET front end for the default-app registration.
+- [Contributing](docs/CONTRIBUTING.md) — development setup and the test suite.
+- [Feedback](https://github.com/StefanBartl/openinnvim/issues)
+
+---
+
+## License
+
+openinnvim is released under the [MIT License](https://opensource.org/licenses/MIT) — see [LICENSE](LICENSE).

@@ -2,9 +2,9 @@
 # Behavior:
 # - Try to open the target in an already running Neovim instance ("current").
 # - Discovery order: configured NVIM_SERVER -> stable pipe \\.\pipe\nvim-%USERNAME% (if it exists) ->
-#   every running instance with a UI attached (default pipes \\.\pipe\nvim.<pid>.<n>) -> `nvr --serverlist`
-#   (only if nothing above took the target).
-# - Files and folders are handed over by RPC on the pipe; the command line (nvim --remote) is the fallback.
+#   every running instance with a UI attached (default pipes \\.\pipe\nvim.<pid>.<n>).
+# - Files and folders are handed over by RPC on the pipe; `nvim --server ... --remote` is the fallback for
+#   non-pipe addresses (TCP). No external tool besides Neovim itself is needed.
 # - If no server is reachable, start a NEW instance with `--listen` at a stable address and open the target.
 # Compatible with Windows PowerShell 5.1 (no CmdletBinding, no null-conditional, no ?: operator).
 
@@ -144,11 +144,9 @@ function Show-Debug {
 # 3) Resolve binaries
 # ---------------------------
 $NVIM = Resolve-Bin $Cfg.NVIM_BIN 'nvim'
-$NVR  = Resolve-Bin $null 'nvr'         # optional
-# OPEN_IN_NVIM_ONLY_PIDS (tests, debugging) restricts the launcher to those processes. nvr and the
-# per-user pipe name are not PID based and could reach a real session, so they stay out of it.
+# OPEN_IN_NVIM_ONLY_PIDS (tests, debugging) restricts the launcher to those processes. The per-user pipe
+# name is not PID based and could reach a real session, so it stays out of it.
 $OnlyPidsMode = [bool]$env:OPEN_IN_NVIM_ONLY_PIDS
-if ($OnlyPidsMode) { $NVR = $null }
 if (-not $NVIM) {
   Write-Error "Neovim not found. Fix NVIM_BIN in config or ensure 'nvim' is on PATH."
   exit 1
@@ -225,9 +223,6 @@ if ($pick -eq 'ask' -and $found.Count -gt 1 -and -not $env:OPEN_IN_NVIM_DRYRUN) 
   }
 }
 
-# 5.4 / 5.5 nvr --serverlist and the per-user pipe as a last fallback are only consulted when none of
-# the candidates above took the target (see section 6): nvr is a Python script and costs about 300 ms.
-
 # ---------------------------
 # 6) Open the target in a running instance
 # ---------------------------
@@ -238,8 +233,8 @@ function Invoke-Bounded {
     .RETURNS
       The exit code, or $null when the limit was hit (the process tree is then killed by its own PID).
     .NOTES
-      Both nvr (which hangs on Windows pipes) and nvim --remote against a busy or hung instance can
-      block forever. This script runs hidden, so a hang would be invisible and never end.
+      nvim --remote against a busy or hung instance can block forever. This script runs hidden, so a
+      hang would be invisible and never end.
   #>
   param([string]$Exe, [string[]]$ArgList, [int]$TimeoutMs = 5000)
   $q = @()
@@ -285,50 +280,6 @@ function Try-Open-With-NvimRemote {
   return ($rc -eq 0)
 }
 
-function Try-Open-With-Nvr {
-  # Last resort only. --nostart: never let nvr launch an editor of its own when it cannot connect.
-  param([string]$server, [string]$cwd, [string]$fileArg, [bool]$isDir)
-  if (-not $NVR) { return $false }
-
-  if ($isDir) {
-    $keys = Build-RemoteEditCommand -cwd $cwd -file $null
-    $rc = Invoke-Bounded -Exe $NVR -ArgList @('--nostart', '--servername', $server, '--remote-send', $keys)
-  } else {
-    $rc = Invoke-Bounded -Exe $NVR -ArgList @('--nostart', '--servername', $server, '--remote', $fileArg)
-  }
-  return ($rc -eq 0)
-}
-
-function Get-NvrServers {
-  <#
-    .SYNOPSIS
-      Server addresses from "nvr --serverlist"; empty when nvr is missing, fails or takes too long.
-  #>
-  if (-not $NVR) { return @() }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $NVR
-  $psi.Arguments = '--serverlist'
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $proc = $null
-  try { $proc = [System.Diagnostics.Process]::Start($psi) } catch { return @() }
-  $outTask = $proc.StandardOutput.ReadToEndAsync()
-  $errTask = $proc.StandardError.ReadToEndAsync()     # drained so a chatty nvr cannot block on a full pipe
-  if (-not $proc.WaitForExit(4000)) {
-    & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
-    return @()
-  }
-  if ($proc.ExitCode -ne 0 -or -not $outTask.Wait(1000)) { return @() }
-  $list = @()
-  foreach ($line in ($outTask.Result -split "`r?`n")) {
-    $addr = $line.Trim()
-    if ($addr -ne '') { $list += $addr }
-  }
-  return $list
-}
-
 $FolderMode = [string](Get-CfgValue 'FOLDER_OPENS_IN' 'filetree')
 $OpenPath   = if ($IsDir) { $Cwd } else { $FileArg }
 
@@ -347,36 +298,22 @@ function Open-ViaServer {
     # same wall, so go on to the next instance.
     if ($r.Connected) { return $false }
   }
-  if (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir) { return $true }
-  return (Try-Open-With-Nvr -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir)
+  return (Try-Open-With-NvimRemote -server $srv -cwd $Cwd -fileArg $FileArg -isDir $IsDir)
 }
 
-# Diagnostics: OPEN_IN_NVIM_DRYRUN=1 prints the ordered candidates (including the late ones) and exits
-# without opening anything.
+# With nothing else to try, fall back to the per-user pipe name (matches the common init.lua pattern).
+if ($candidates.Count -eq 0) { [void]$candidates.Add($StablePipe) }
+
+# Diagnostics: OPEN_IN_NVIM_DRYRUN=1 prints the ordered candidates and exits without opening anything.
 if ($env:OPEN_IN_NVIM_DRYRUN) {
-  $all = New-Object System.Collections.ArrayList
-  foreach ($c in $candidates) { [void]$all.Add($c) }
-  foreach ($c in @(Get-NvrServers)) { if (-not $all.Contains($c)) { [void]$all.Add($c) } }
-  if ($all.Count -eq 0) { [void]$all.Add($StablePipe) }
-  foreach ($c in $all) { Write-Output ('candidate: ' + $c) }
+  foreach ($c in $candidates) { Write-Output ('candidate: ' + $c) }
   exit 0
 }
 
-$tried = @{}
 foreach ($srv in $candidates) {
-  $tried[$srv] = $true
+  # ONLY_PIDS mode must never reach a real session through the per-user pipe name.
+  if ($OnlyPidsMode -and $srv -eq $StablePipe) { continue }
   if (Open-ViaServer $srv) { exit 0 }
-}
-
-# Last resorts, in this order: whatever nvr lists, then the per-user pipe name (matches the common
-# init.lua pattern) when there was nothing at all to try.
-$late = @(Get-NvrServers | Where-Object { -not $tried.ContainsKey($_) })
-foreach ($srv in $late) {
-  $tried[$srv] = $true
-  if (Open-ViaServer $srv) { exit 0 }
-}
-if ($candidates.Count -eq 0 -and $late.Count -eq 0 -and -not $OnlyPidsMode) {
-  if (Open-ViaServer $StablePipe) { exit 0 }
 }
 
 # ---------------------------

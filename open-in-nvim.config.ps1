@@ -1,31 +1,33 @@
 # open-in-nvim.config.ps1
-# Zentrale Konfiguration für beide Einträge:
+# Central configuration for both entries:
 # - "Open with Neovim (new instance)"
 # - "Open with Neovim (current instance)"
+# Every key is optional; see docs/configuration.md.
 
 $Cfg = [ordered]@{
-  # Absoluter Pfad zu Neovim (empfohlen). Falls nicht vorhanden, fällt das Skript auf "nvim" im PATH zurück.
+  # Absolute path to Neovim (recommended). If it does not exist, the scripts fall back to "nvim" on PATH.
   NVIM_BIN    = 'C:\Program Files\Neovim\bin\nvim.exe'
 
-  # Optionales Terminal. Reihenfolge im Startskript: WezTerm -> Windows Terminal ("wt") -> cmd.exe ("start")
+  # Optional terminal. Order in the launch script: WezTerm -> Windows Terminal ("wt") -> cmd.exe ("start")
   WEZTERM_BIN = "$env:LOCALAPPDATA\wezterm\wezterm-gui.exe"
 
-  # Stabile Serveradresse für "current instance".
-  # Leer lassen, wenn die Auto-Discovery (nvr --serverlist) oder die Heuristik \\.\pipe\nvim-%USERNAME% verwendet werden soll.
+  # Fixed server address tried first by "current instance" (a pipe name or host:port).
+  # Leave empty to find the running instances automatically (default pipes, see docs/configuration.md).
   NVIM_SERVER = ''
 
-  # Fester Pipe-Name \\.\pipe\nvim-%USERNAME% (falls die eigene init.lua ihn mit serverstart() anlegt) hat Vorrang.
-  # $false: den festen Namen überspringen und nur die laufenden Instanzen betrachten.
+  # A fixed pipe name \\.\pipe\nvim-%USERNAME% (if your init.lua creates it with serverstart()) goes first.
+  # $false: skip the fixed name and treat all running instances alike.
   PREFER_STABLE_PIPE = $true
 
-  # Welche laufende Instanz zuerst probiert wird, wenn mehrere da sind (jede Neovim-Sitzung hat ohne
-  # Konfiguration eine Pipe \\.\pipe\nvim.<pid>.<n>; Instanzen ohne angedocktes UI, also --headless-Hilfsprozesse, werden ignoriert):
-  #   'newest' = zuletzt gestartete (Standard), 'oldest' = am längsten laufende,
-  #   'ask'    = Auswahlfenster mit Arbeitsverzeichnis und Datei jeder Instanz.
+  # Which running instance is tried first when there are several. Every Neovim session has a pipe
+  # \\.\pipe\nvim.<pid>.<n> without any configuration; instances without an attached UI (--headless
+  # helpers) are ignored:
+  #   'newest' = the most recently started (default), 'oldest' = the longest running,
+  #   'ask'    = a chooser window showing each instance's working directory and file.
   INSTANCE_PICK = 'newest'
 
-  # Was bei einem Ordner in "current instance" passiert:
-  #   'filetree' = filetree.nvim auf den Ordner richten (:Filetree open <dir>), wenn die Instanz es hat,
-  #   'edit'     = immer cd + Verzeichnisansicht (:edit .).
+  # What a folder does in "current instance":
+  #   'filetree' = point filetree.nvim at the folder (:Filetree open <dir>) if the instance has it,
+  #   'edit'     = always cd + directory view (:edit .).
   FOLDER_OPENS_IN = 'filetree'
 }
