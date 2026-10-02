@@ -12,8 +12,10 @@ Kompatibel mit Windows PowerShell 5.1.
 **PowerShell:**
 
 ```powershell
-New-Item -ItemType Junction -Path 'C:\tools\OpenInNvim' -Target 'E:\repos\Configs\Windows\Contextmenu\OpenInNvim'
+New-Item -ItemType Junction -Path 'C:\tools\OpenInNvim' -Target 'E:\repos\openinnvim'
 ```
+
+Eine Junction braucht weder Administratorrechte noch den Entwicklermodus (anders als ein Symlink).
 
 ## Ziele
 
@@ -24,11 +26,11 @@ New-Item -ItemType Junction -Path 'C:\tools\OpenInNvim' -Target 'E:\repos\Config
 
 ## Verzeichnisstruktur
 
-**Physische Ablage (Repo-Empfehlung):**
-`E:\repos\Configs\Windows\Contextmenu\OpenInNvim`
+**Physische Ablage (dieses Repo):**
+`E:\repos\openinnvim`
 
 **Kompatibilitätslink für Registry (Junction):**
-`C:\tools\OpenInNvim  →  E:\repos\Configs\Windows\Contextmenu\OpenInNvim`
+`C:\tools\OpenInNvim  →  E:\repos\openinnvim`
 
 **Inhalt:**
 C:\tools\OpenInNvim\
@@ -44,7 +46,7 @@ C:\tools\OpenInNvim\
 ## Installation
 
 1) Dateien ablegen
-   `E:\repos\Configs\Windows\Contextmenu\OpenInNvim verwalten und Junction nach C:\tools\OpenInNvim setzen.`
+   Dieses Repo (`E:\repos\openinnvim`) verwalten und die Junction nach `C:\tools\OpenInNvim` setzen.
 
 2) Kontextmenü einrichten
    Variante A (Skript):
@@ -112,8 +114,12 @@ wscript //nologo "C:\tools\OpenInNvim\open-in-nvim-current.vbs" "%USERPROFILE%\D
 ## Deinstallation
 
 - Kontextmenü entfernen: remove-old.reg importieren oder install-context.ps1 anpassen (nur Remove-Key-Aufrufe).
-- Junction entfernen:
-  Remove-Item -LiteralPath 'C:\tools\OpenInNvim' -Recurse -Force
+- Junction entfernen (nur den Link, nie den Inhalt; `Remove-Item -Recurse` auf eine Junction kann in
+  Windows PowerShell 5.1 den Zielordner leeren):
+
+  ```powershell
+  [IO.Directory]::Delete('C:\tools\OpenInNvim', $false)
+  ```
 
 ## Hinweise
 
