@@ -195,13 +195,11 @@ namespace OpenInNvim
                     if (outcome == OpenOutcome.Opened)
                     {
                         Log.Line("opened in " + c.Address + " (" + detail + ")");
-                        if (cfg.FocusTerminal) { Focus.Raise(c.Pid); }
                         return 0;
                     }
                     if (outcome == OpenOutcome.Delivered)
                     {
                         Log.Line("delivered to " + c.Address + ": " + detail);
-                        if (cfg.FocusTerminal) { Focus.Raise(c.Pid); }
                         return 0;
                     }
                     Log.Line("not opened in " + c.Address + " (" + outcome.ToString() + "): " + detail);

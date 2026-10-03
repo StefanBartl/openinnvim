@@ -95,9 +95,12 @@ namespace OpenInNvim
             string nvim = null;
             try
             {
-                if (!string.IsNullOrEmpty(cfg.NvimBin) && File.Exists(cfg.NvimBin)) { nvim = Path.GetFullPath(cfg.NvimBin); }
+                // Only a rooted path is taken as a file. A bare name is looked up on PATH, never in the
+                // working directory: that is the folder that was clicked.
+                if (!string.IsNullOrEmpty(cfg.NvimBin) && Path.IsPathRooted(cfg.NvimBin) && File.Exists(cfg.NvimBin)) { nvim = Path.GetFullPath(cfg.NvimBin); }
             }
             catch (Exception) { nvim = null; }
+            if (nvim == null && !string.IsNullOrEmpty(cfg.NvimBin) && cfg.NvimBin.IndexOfAny(new char[] { '\\', '/', ':' }) < 0) { nvim = CommandLine.FindOnPath(cfg.NvimBin); }
             if (nvim == null) { nvim = CommandLine.FindOnPath("nvim"); }
             if (nvim == null) { return null; }
 

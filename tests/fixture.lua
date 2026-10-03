@@ -9,7 +9,7 @@
 -- The two headless ones must be ignored by the discovery.
 -- Only processes started here are ever stopped (by job id), never by image name.
 --
--- Optional third argument (tests/run-native-tests.ps1): more editor instances, each started with
+-- Optional third argument (tests/run-tests.ps1): more editor instances, each started with
 -- "--listen <address>" instead of the default pipe, as "label=address;label=address". An address is
 -- a pipe name or host:port. Such an instance owns NO \\.\pipe\nvim.<pid>.<n>.
 
