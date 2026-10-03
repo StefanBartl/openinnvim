@@ -92,8 +92,8 @@ nach den drei Fixes unten.
 - [ ] Unabhängiges Review über `src\` und die Installer (Paket 5).
 - [ ] Test der Explorer-Übergabe über ein Shell-Verb (`Start-Process -Verb`) fehlt.
 - [ ] Vertrauensprüfung "anderer Benutzer / andere Sitzung" ist eingebaut, aber ungetestet.
-- [ ] `docs/ROADMAP/Final_Checks/openinnvim-live-tests-2026-10-02.md` beschreibt noch die alte Kette
-      und muss für die exe neu geschrieben werden.
+- [x] Live-Test-Liste für die exe neu geschrieben und ins Repo geholt: [`LIVE-TESTS.md`](LIVE-TESTS.md)
+      (am 2026-10-03; die meisten Punkte sind noch ungetestet).
 - [ ] WKDBook: `openinnvim/ROADMAP/ROADMAP.md` und Backlog an den neuen Stand anpassen.
 - [ ] Beim Docs-Abgleich gefunden, noch offen: Chooser-Label ohne Startzeit; Fokus für eine reine
       Konsole (`AttachConsole` aus dem Design fehlt); `install-icons-for-progids.ps1` ist verwaist
@@ -131,7 +131,7 @@ nach den drei Fixes unten.
 | neotest-Listener: Messtabellen, Optionen, Wiederholung der Messung | `.../openinnvim/Backlog/TASKS/2026-10-02_neotest-listener-messung.md` |
 | Review-Funde (Bug / Sicherheit / Performance), Docs-Standardisierung, PowerShell-5.1-Lehre | `.../openinnvim/Backlog/TASKS/2026-10-02_openinnvim-review.md` |
 | Installer, relative VBS, Fokus, **zweiter** Review | `.../openinnvim/Backlog/TASKS/2026-10-02_installer-fokus-zweiter-review.md` |
-| Live-Tests für dich | `docs/ROADMAP/Final_Checks/openinnvim-live-tests-2026-10-02.md` |
+| Live-Tests für dich | [`LIVE-TESTS.md`](LIVE-TESTS.md) |
 | **Review-Fundstellen vom 2026-10-03 (31 Stück, ungeprüft)** | [`REVIEW-2026-10-03.md`](REVIEW-2026-10-03.md) |
 | **Design des nativen Launchers, Paketplan mit Stand** | `WKDBooks/.../openinnvim/ROADMAP/native-launcher-design.md` |
 | Probe-Tool für neotest-Läufe mit der echten Config | `WKDBooks/.../TOOLS/neotest-run-probe.md`, `TOOLS/scripts/neotest-run-probe/` |
