@@ -28,6 +28,8 @@ namespace OpenInNvim
         public bool AllowTcp;
         /// <summary>OPEN_IN_NVIM_ONLY_PIDS: the only processes that may ever be contacted; null = no limit.</summary>
         public int[] OnlyPids;
+        /// <summary>OPEN_IN_NVIM_PICK: index the chooser returns without showing a window (tests); -1 = ask.</summary>
+        public int PickIndex = -1;
         /// <summary>OPEN_IN_NVIM_LOG: file to append the decision log to.</summary>
         public string LogPath;
         /// <summary>USERNAME, for the stable pipe name nvim-&lt;USERNAME&gt;.</summary>
@@ -42,6 +44,8 @@ namespace OpenInNvim
             h.NoUi = IsSet("OPEN_IN_NVIM_NO_UI");
             h.AllowTcp = IsSet("OPEN_IN_NVIM_ALLOW_TCP");
             h.OnlyPids = ParsePids(Environment.GetEnvironmentVariable("OPEN_IN_NVIM_ONLY_PIDS"));
+            int pick;
+            if (int.TryParse(Environment.GetEnvironmentVariable("OPEN_IN_NVIM_PICK"), NumberStyles.None, CultureInfo.InvariantCulture, out pick)) { h.PickIndex = pick; }
             h.LogPath = Environment.GetEnvironmentVariable("OPEN_IN_NVIM_LOG");
             h.UserName = Environment.GetEnvironmentVariable("USERNAME");
             return h;
@@ -161,15 +165,21 @@ namespace OpenInNvim
                 return 0;
             }
 
-            if (cfg.InstancePick == "ask" && !Chooser.IsBuilt())
+            List<Candidate> order = found.Candidates;
+            if (cfg.InstancePick == "ask")
             {
-                Log.Line("INSTANCE_PICK = ask: the chooser is not built yet (package 2), using the newest instance");
+                order = Ask(found.Candidates, hooks);
+                if (order == null)
+                {
+                    Log.Line("chooser cancelled, nothing opened");
+                    return 0;
+                }
             }
 
             // Lazy: the first usable instance in order gets the file; the others are never contacted.
-            for (int i = 0; i < found.Candidates.Count; i++)
+            for (int i = 0; i < order.Count; i++)
             {
-                Candidate c = found.Candidates[i];
+                Candidate c = order[i];
                 string why;
                 Session s = Discovery.Connect(c, hooks, out why);
                 if (s == null)
@@ -185,11 +195,13 @@ namespace OpenInNvim
                     if (outcome == OpenOutcome.Opened)
                     {
                         Log.Line("opened in " + c.Address + " (" + detail + ")");
+                        if (cfg.FocusTerminal) { Focus.Raise(c.Pid); }
                         return 0;
                     }
                     if (outcome == OpenOutcome.Delivered)
                     {
                         Log.Line("delivered to " + c.Address + ": " + detail);
+                        if (cfg.FocusTerminal) { Focus.Raise(c.Pid); }
                         return 0;
                     }
                     Log.Line("not opened in " + c.Address + " (" + outcome.ToString() + "): " + detail);
@@ -204,6 +216,45 @@ namespace OpenInNvim
                 return 3;
             }
             return Spawner.Start(target, cfg, hooks, found.ListenPipe);
+        }
+
+        /// <summary>
+        /// INSTANCE_PICK = ask: every candidate is probed (the list must be complete), and with more than
+        /// one usable instance the person picks. The pick is the ONLY candidate afterwards: it wins over
+        /// the stable pipe and NVIM_SERVER. Null = cancelled.
+        /// </summary>
+        private static List<Candidate> Ask(List<Candidate> candidates, Hooks hooks)
+        {
+            List<Candidate> usable = new List<Candidate>();
+            List<string> labels = new List<string>();
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                Candidate c = candidates[i];
+                string why;
+                Session s = Discovery.Connect(c, hooks, out why);
+                if (s == null)
+                {
+                    Log.Line("skip " + c.Address + ": " + why);
+                    continue;
+                }
+                try
+                {
+                    string label = "pid " + c.Pid.ToString(CultureInfo.InvariantCulture);
+                    RpcReply r = s.Rpc.Call("nvim_eval", new object[] { "getcwd() . '  |  ' . fnamemodify(bufname('%'), ':t')" }, Discovery.ProbeTimeoutMs);
+                    if (r.Status == ReplyStatus.Ok && r.Result is string) { label = (string)r.Result + "   (" + label + ")"; }
+                    usable.Add(c);
+                    labels.Add(label);
+                }
+                finally { s.Dispose(); }
+            }
+            if (usable.Count <= 1) { return usable; }
+
+            int pick = Chooser.Pick(labels.ToArray(), hooks);
+            if (pick < 0) { return null; }
+            Log.Line("chooser: picked " + usable[pick].Address);
+            List<Candidate> one = new List<Candidate>();
+            one.Add(usable[pick]);
+            return one;
         }
 
         private static void PrintTarget(string mode, Target target)

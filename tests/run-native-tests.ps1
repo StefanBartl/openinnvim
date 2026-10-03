@@ -654,7 +654,7 @@ return true
   Set-Ini @{ INSTANCE_PICK = 'ask' }
   $askFile = New-TestFile 'ask.txt'
   $res = Open-File $askFile
-  Assert-That 'INSTANCE_PICK = ask (chooser is package 2): newest, with a log line' (($res.Code -eq 0) -and ((Get-CurrentName $g2) -ceq $askFile) -and (@($res.Log | Where-Object { $_ -like '*INSTANCE_PICK = ask*' }).Count -eq 1))
+  Assert-That 'INSTANCE_PICK = ask without a window (NO_UI): the first entry, i.e. the newest' (($res.Code -eq 0) -and ((Get-CurrentName $g2) -ceq $askFile) -and (@($res.Log | Where-Object { $_ -like '*chooser: picked*' }).Count -eq 1))
   Set-Ini $null
   $res = Open-File $target @{ OPEN_IN_NVIM_ONLY_PIDS = "$($Pids.gui1)" }
   Assert-That 'restricted to one PID' (($res.Code -eq 0) -and ((Get-CurrentName $g1) -ceq $target))
@@ -1090,6 +1090,60 @@ return true
   $res = Invoke-Oin ('current "' + $target + '"') @{ OPEN_IN_NVIM_ONLY_PIDS = '999999'; OPEN_IN_NVIM_NO_SPAWN = $null; OPEN_IN_NVIM_SPAWN_DRYRUN = '1' }
   $spawn = @($res.Lines | Where-Object { $_ -like 'spawn: *' })
   Assert-That '"current" without a usable instance goes through the same spawner; no --listen by default' (($res.Code -eq 0) -and ($spawn.Count -eq 1) -and (-not $spawn[0].Contains('--listen')) -and $spawn[0].Contains('"--" "' + $target + '"')) ("out=" + ($res.Lines -join ' / '))
+  # -------------------------------------------------------------------------------------------
+  Write-Host '== terminals for a new instance'
+  # Fake terminals: empty files named like the programs, in a private PATH folder.
+  $termDir = [string](Join-Path $tmp 'terms'); [void][IO.Directory]::CreateDirectory($termDir)
+  foreach ($n in 'wezterm-gui.exe', 'wt.exe') { [IO.File]::WriteAllBytes((Join-Path $termDir $n), [byte[]]@()) }
+  $semiDir = [string](Join-Path $tmp 'a;b'); [void][IO.Directory]::CreateDirectory($semiDir)
+  $semiFile = New-TestFile 'x;y.txt' $semiDir
+  function Get-Via { param($Res) return @($Res.Lines | Where-Object { $_ -like 'spawn-via: *' } | ForEach-Object { $_.Substring(11) }) }
+  Set-Ini @{ NVIM_BIN = $nvim }
+  $res = Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $termDir })
+  $via = @(Get-Via $res)
+  Assert-That 'TERMINAL = auto: WezTerm, then Windows Terminal, then the console' (($via.Count -eq 3) -and ($via[0] -like 'wezterm *') -and ($via[1] -like 'wt *') -and ($via[2] -like 'console *')) ("via=" + ($via -join ' / '))
+  Assert-That 'WezTerm: start --cwd <dir> -- <nvim> -- <file>' ($via[0] -eq ('wezterm ' + (Join-Path $termDir 'wezterm-gui.exe') + ' "start" "--cwd" "' + $tmp + '" "--" "' + $nvim + '" "--" "' + $target + '"')) ("via=" + $via[0])
+  Assert-That 'Windows Terminal: -w 0 nt -d <dir> -- <nvim> -- <file>' ($via[1] -eq ('wt ' + (Join-Path $termDir 'wt.exe') + ' "-w" "0" "nt" "-d" "' + $tmp + '" "--" "' + $nvim + '" "--" "' + $target + '"')) ("via=" + $via[1])
+  Assert-That 'console: Neovim itself, no cmd.exe anywhere' (($via[2] -eq ('console ' + $nvim + ' "--" "' + $target + '"')) -and (@($via | Where-Object { $_ -match 'cmd\.exe' }).Count -eq 0))
+  $res = Invoke-Oin ('new "' + $semiFile + '"') ($spawnEnv + @{ PATH = $termDir })
+  $via = @(Get-Via $res)
+  Assert-That 'Windows Terminal: a ";" in a name is written "\;" (its command separator)' (($via[1].Contains('a\;b')) -and ($via[1].Contains('x\;y.txt')) -and ($via[0].Contains('a;b')) -and (-not $via[0].Contains('\;'))) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim; TERMINAL = 'wt' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $termDir })))
+  Assert-That 'TERMINAL = wt: Windows Terminal, console as the fallback' (($via.Count -eq 2) -and ($via[0] -like 'wt *') -and ($via[1] -like 'console *')) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim; TERMINAL = 'console' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $termDir })))
+  Assert-That 'TERMINAL = console: only the console' (($via.Count -eq 1) -and ($via[0] -like 'console *')) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim; TERMINAL = 'wezterm' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA })))
+  Assert-That 'a named terminal that is not installed falls back to the console' (($via.Count -eq 1) -and ($via[0] -like 'console *')) ("via=" + ($via -join ' / '))
+  $wezCfg = [string](Join-Path $tmp 'my wez.exe'); [IO.File]::WriteAllBytes($wezCfg, [byte[]]@())
+  Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = $wezCfg }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA })))
+  Assert-That 'WEZTERM_BIN from the config wins over PATH' (($via.Count -ge 1) -and ($via[0] -like ('wezterm ' + $wezCfg + ' *'))) ("via=" + ($via -join ' / '))
+
+  # -------------------------------------------------------------------------------------------
+  Write-Host '== chooser (INSTANCE_PICK = ask) and focus'
+  foreach ($rpc in $g1, $g2) { Reset-Instance $rpc }
+  $two = "$($Pids.gui1),$($Pids.gui2)"
+  $askFile = New-TestFile 'ask me.txt'
+  Set-Ini @{ INSTANCE_PICK = 'ask' }
+  $res = Open-File $askFile @{ OPEN_IN_NVIM_ONLY_PIDS = $two; OPEN_IN_NVIM_PICK = '1' }
+  Assert-That 'ask: the picked instance (second in the list = the older one) gets the file' (($res.Code -eq 0) -and (Test-HasBuffer $g1 $askFile) -and (-not (Test-HasBuffer $g2 $askFile))) ("log=" + ($res.Log -join ' / '))
+  $askFile2 = New-TestFile 'ask me 2.txt'
+  $res = Open-File $askFile2 @{ OPEN_IN_NVIM_ONLY_PIDS = $two; OPEN_IN_NVIM_PICK = '0' }
+  Assert-That 'ask: picking the first entry opens in the newest' (($res.Code -eq 0) -and (Test-HasBuffer $g2 $askFile2) -and (-not (Test-HasBuffer $g1 $askFile2)))
+  $askFile3 = New-TestFile 'ask me 3.txt'
+  $res = Open-File $askFile3 @{ OPEN_IN_NVIM_ONLY_PIDS = $two; OPEN_IN_NVIM_PICK = '9' }
+  Assert-That 'ask: cancelled -> exit 0, nothing opened anywhere, nothing started' (($res.Code -eq 0) -and (-not (Test-HasBuffer $g1 $askFile3)) -and (-not (Test-HasBuffer $g2 $askFile3)) -and (@($res.Log | Where-Object { $_ -like '*chooser cancelled*' }).Count -eq 1))
+  $res = Open-File $askFile3 @{ OPEN_IN_NVIM_ONLY_PIDS = "$($Pids.gui1)"; OPEN_IN_NVIM_PICK = '9' }
+  Assert-That 'ask with a single usable instance: no chooser, it just opens' (($res.Code -eq 0) -and (Test-HasBuffer $g1 $askFile3))
+  Set-Ini @{ FOCUS_TERMINAL = 'true' }
+  $focusFile = New-TestFile 'focus me.txt'
+  $res = Open-File $focusFile @{ OPEN_IN_NVIM_ONLY_PIDS = $two }
+  Assert-That 'FOCUS_TERMINAL: best effort, the open still succeeds and the attempt is logged' (($res.Code -eq 0) -and (Test-HasBuffer $g2 $focusFile) -and (@($res.Log | Where-Object { $_ -like '*focus*' }).Count -ge 1)) ("log=" + ($res.Log -join ' / '))
+  Assert-That 'Focus.FindHostWindow of a process without any window in its ancestry is zero or a real window, never an exception' ($true -eq ([OpenInNvim.Focus]::FindHostWindow(4) -is [IntPtr]))
+
   Set-Ini @{ NVIM_BIN = (Join-Path $tmp 'no such nvim.exe') }
   $res = Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA })
   Assert-That 'Neovim neither configured nor on PATH: exit 1 (nothing startable)' (($res.Code -eq 1) -and (@($res.Log | Where-Object { $_ -like '*nothing startable*' }).Count -eq 1)) "code=$($res.Code) out=$($res.Text)"
