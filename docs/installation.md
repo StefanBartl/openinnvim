@@ -60,7 +60,9 @@ next click runs the new build.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1 -RemoveFiles
 ```
 
-- Without `-RemoveFiles` only the six registry entries go.
+- Without `-RemoveFiles` only registry entries go: the six context-menu entries and, if you
+  ran `register-nvim-default-app.ps1` / `install-icons-for-progids.ps1`, the `Neovim.TextFile`
+  (`.New`, `.Current`) default-app registrations. Nothing else in the registry is touched.
 - With it, the files listed in the install folder's `install.manifest.txt` are deleted —
   exactly those, never a recursive delete — and the folder itself if it ends up empty.
 - Your config is kept unless you add `-RemoveConfig`.
