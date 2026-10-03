@@ -9,7 +9,7 @@ nvim-config. Pfade mit `docs/ROADMAP/...` ohne Repo-Angabe meinen das nvim-confi
 
 **Der neotest-Teil** (Listener, `NVIM_LISTEN_ADDRESS`, scheiternde `neotest-plenary`-Läufe, "Option E")
 betrifft die nvim-config und liegt dort:
-`nvim-config/docs/ROADMAP/handovers/neotest_HANDOVER.md`.
+`nvim-config/Backlog/TASKS/neotest-listener-und-windows-laeufe-2026-10-03.md`.
 
 ---
 

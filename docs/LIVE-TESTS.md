@@ -216,4 +216,4 @@ Nur wenn du Neovim als Standard-App für Dateitypen benutzt (`docs/FEATURES/DEFA
 - Geänderte Einstellungen in `%LOCALAPPDATA%\OpenInNvim\open-in-nvim.ini` zurück auf den Standard.
 - Testordner löschen: `Remove-Item "$env:USERPROFILE\Desktop\oin-test" -Recurse`.
 - Der frühere Teil K (neotest-Listener) gehört nicht hierher; er steht im neotest-Handover der
-  nvim-config (`docs/ROADMAP/handovers/neotest_HANDOVER.md`).
+  nvim-config (WKDBooks `nvim-config/Backlog/TASKS/neotest-listener-und-windows-laeufe-2026-10-03.md`).
