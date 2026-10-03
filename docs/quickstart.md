@@ -12,24 +12,33 @@ folder; otherwise the folder becomes the working directory with a directory view
 
 ## See what the launcher would do, without opening anything
 
+`OpenInNvim.exe` has no console, so pipe its output:
+
 ```powershell
 $env:OPEN_IN_NVIM_DRYRUN = '1'
-powershell -NoProfile -ExecutionPolicy Bypass -File $env:LOCALAPPDATA\OpenInNvim\open-in-nvim-current.ps1 "$env:USERPROFILE\Desktop\test.txt"
+& "$env:LOCALAPPDATA\OpenInNvim\OpenInNvim.exe" current "$env:USERPROFILE\Desktop\test.txt" | Out-String
 ```
 
-It prints the instances it would try, in order:
+It prints the target and the instances it would try, in order:
 
 ```
-candidate: \\.\pipe\nvim-<USER>
-candidate: \\.\pipe\nvim.52328.0
+mode: current
+target: file C:\Users\<USER>\Desktop\test.txt
+cwd: C:\Users\<USER>\Desktop
+candidate: \\.\pipe\nvim.52328.0 pid=52328
+candidate: \\.\pipe\nvim.41200.0 pid=41200
 ```
 
-No candidate and no running Neovim means the next click starts a new instance; to
-see that command instead of running it:
+No candidate means the next click starts a new instance; to see that command instead of
+running it:
 
 ```powershell
+$env:OPEN_IN_NVIM_DRYRUN = $null
 $env:OPEN_IN_NVIM_SPAWN_DRYRUN = '1'
+& "$env:LOCALAPPDATA\OpenInNvim\OpenInNvim.exe" new "$env:USERPROFILE\Desktop\test.txt" | Out-String
 ```
 
-Every switch is listed in [BINDINGS.md](BINDINGS.md#diagnostic-switches). If a click
-does nothing, start with [troubleshooting.md](troubleshooting.md).
+Remove both variables again afterwards (`$env:OPEN_IN_NVIM_SPAWN_DRYRUN = $null`).
+
+Every switch is listed in [configuration.md](configuration.md#environment-switches). If
+a click does nothing, start with [troubleshooting.md](troubleshooting.md).

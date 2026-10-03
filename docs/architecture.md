@@ -1,32 +1,47 @@
 # Why it does it that way
 
-## The chain
+## One program
 
 ```
 Explorer click
-  -> wscript.exe  open-in-nvim[-current].vbs      (hidden: no console window)
-  -> powershell.exe -NoProfile ... -File open-in-nvim[-current].ps1   (found next to the VBS)
-  -> Neovim (RPC over a named pipe)  or  a new terminal running nvim.exe
+  -> "<dir>\OpenInNvim.exe" current|new "<path>"
+  -> Neovim (RPC over a named pipe)  or  a terminal running nvim.exe
 ```
 
-The VBS exists only because `powershell.exe` started from a context-menu entry
-flashes a console window; `WScript.Shell.Run` with window style 0 does not. Both
-`.ps1` files dot-source `open-in-nvim.lib.ps1` (instance discovery, the RPC client,
-command-line quoting, detached spawn) and read `open-in-nvim.config.ps1`.
+`OpenInNvim.exe` is a windowed program (no console, so nothing flashes), written in C# 5
+against .NET Framework 4.x and compiled from `src\*.cs` by `build.ps1` with the `csc.exe`
+that ships with Windows. No SDK, no packages.
 
-The VBS asks `WScript.ScriptFullName` where it lives and starts the `.ps1` from the same
-folder, so nothing is hard-coded: an installed copy, a clone used in place and an
-earlier junction all work. It quotes every argument itself (an argument with a space, a
-quote or a trailing backslash would otherwise swallow its closing quote).
+Earlier versions went Explorer → `wscript.exe` → a VBS wrapper → Windows PowerShell 5.1.
+Starting PowerShell was most of the cost of a click: about 540 ms for the script alone
+and 642 ms through `wscript`, against about 53 ms for the compiled program (one machine,
+`--clean` instances, file opened in the newest of two). The number depends on the machine;
+the ratio is the point.
 
-## Installation
+The sources are split by concern:
 
-`install.ps1` copies the five launcher files, writes the config with the detected
-`nvim.exe`, and writes six registry keys through the .NET registry API (`*` is a real key
-name, so there is no PowerShell path wildcarding to trip over). A manifest in the install
-folder lists what was copied, so `uninstall.ps1 -RemoveFiles` deletes exactly that and
-never recurses. The registry root is a parameter (`-ClassesKey`), which is how the test
-suite exercises the whole install and uninstall against a throw-away key.
+| File | Holds |
+| --- | --- |
+| `Program.cs` | entry point, the two modes, exit codes, the environment switches |
+| `CommandLine.cs` | reading the raw command line, quoting arguments, the `PATH` lookup |
+| `Config.cs` | `open-in-nvim.ini` |
+| `Target.cs` | what was clicked: file, folder, or a path that does not exist yet |
+| `Pipes.cs` | listing pipes, connecting, the trust check |
+| `Discovery.cs` | the candidates, their order, the usability probe |
+| `MsgPack.cs`, `Rpc.cs` | the MessagePack-RPC client, over a pipe or TCP |
+| `Opener.cs` | the Lua that opens the file or folder, and what the answer means |
+| `Spawner.cs` | starting a new instance in a terminal |
+| `Chooser.cs` | the instance list for `INSTANCE_PICK = ask`, and the error box |
+| `Focus.cs` | `FOCUS_TERMINAL` |
+| `Log.cs`, `Native.cs` | the decision log; the Win32 calls |
+
+## The path comes from the raw command line
+
+Explorer writes `"C:\"` for a drive root, and the usual argument rules read that
+backslash as an escape for the closing quote. A file name cannot contain a double quote,
+so the launcher takes everything after the mode from the raw command line and removes
+the quotes. The path is then used literally — no `%VAR%` expansion (`%TEMP%x` is a legal
+folder name), no wildcards.
 
 ## Neovim is its own server
 
@@ -37,113 +52,116 @@ owns **no** pipe) and its child `nvim.exe --embed` (the editor core, which does)
 the launcher looks for pipes, not for the window's process id. GUIs such as Neovide
 start `--embed` as well.
 
-A client connects to that pipe and sends MessagePack-RPC requests: `nvim_eval`,
-`nvim_exec_lua`, `nvim_command`. Neovim's own `--remote` is exactly that: it
-translates to `nvim_command("drop <file>")` over the same channel. openinnvim speaks
-the protocol directly, with a small client written in PowerShell, instead of starting
-a second `nvim.exe` just to do it.
+Neovim's own `--remote` uses the same channel. openinnvim speaks the protocol directly
+instead of starting a second `nvim.exe` to do it; `nvim --server ... --remote` is never
+used.
 
-### Which instances count
+## Trust: who serves a pipe
+
+The pipe namespace is global on the machine and any local process can create any free
+name, so a name proves nothing. After connecting, and before a single byte is written,
+the launcher asks Windows which process serves the pipe and accepts it only if
+
+- its image is `nvim.exe`,
+- it runs in the launcher's logon session,
+- it runs as the launcher's user (a token that cannot be read is not trusted), and
+- for a `nvim.<pid>.<n>` name, it is the process the name claims.
+
+The same check applies to the stable pipe and to a pipe `NVIM_SERVER`. A squatted name
+never receives a path. Two consequences: a Neovim binary under another name is not
+found, and a TCP `NVIM_SERVER` cannot be checked at all — nobody can tell who listens on
+a port — so TCP is used only for an address written into the config.
+
+## Which instances count
 
 Plugin jobs and helpers have pipes too — a `--headless` job, a `-l` script, a
-plugin's `--embed --headless` child. What separates them from an editor a person sits
-in front of is a **UI**: `len(nvim_list_uis())` is at least 1 for a TUI core or a GUI
-and 0 for the helpers. Asking the instance is cheaper than reading command lines
-through WMI (about 200 ms) and more accurate than pattern-matching them.
+plugin's `--embed --headless` child. An instance is usable when, on one connection:
 
-Only instances of the launcher's own Windows session are considered, so a click never
-sends a file into another logged-in user's editor.
+1. `nvim_get_mode` reports that it is not blocking. This call is answered even at a
+   hit-enter prompt, so an instance waiting for a key is recognised at once and skipped
+   instead of running into a timeout.
+2. `len(nvim_list_uis())` is at least 1: a TUI core or a GUI, not a helper.
 
-### Order
+An instance that does not answer within 300 ms is skipped.
+
+## Order
 
 1. `NVIM_SERVER`, if set.
-2. The stable name `\\.\pipe\nvim-%USERNAME%`, if a session owns it
-   (`PREFER_STABLE_PIPE`).
-3. Every instance with a UI, ordered by `INSTANCE_PICK`.
-4. With nothing at all to try, the stable name, so that an instance started with
-   `--listen` on it is still found.
+2. The instance that serves `\\.\pipe\nvim-%USERNAME%` (`PREFER_STABLE_PIPE`).
+3. Every other instance with a default pipe, by process start time (`INSTANCE_PICK`).
+
+A named pipe only moves its verified owner to the front; if that process has no default
+pipe (started with `--listen`), the named pipe is its address. Probing is lazy: the first
+usable instance gets the target and the others are never contacted. `ask` probes all of
+them, because the list must be complete.
 
 ## Paths are parameters, not text
 
-A file name goes into a single `nvim_exec_lua` call as an argument of a fixed Lua
-snippet:
+The target goes into one `nvim_exec_lua` call as an argument of a fixed Lua snippet. For
+a file that snippet uses `bufadd(path)`, which takes the name verbatim; the only Ex
+commands it runs carry a buffer *number*. There is no Ex file argument anywhere.
 
-```lua
-local f = ...
-vim.cmd("silent drop " .. vim.fn.fnameescape(f))
-```
+That matters because `:edit` and `:drop` expand `$NAME` and treat `[...]` as a wildcard
+even after `fnameescape()`, which opens a different file than the one clicked. With
+`bufadd`, names containing `%`, `$`, `[ ]`, `#`, quotes, spaces or Unicode open as the
+same file. `:Filetree open` gets the folder as an argument table for the same reason.
 
-Nothing is spliced into command text, so `#`, `%`, `[`, `(`, quotes and `&` need no
-treatment — the same reason `:Filetree open` is called with `vim.cmd.Filetree({ args =
-{ "open", dir } })`. An earlier version built `:Filetree open <fnameescape(dir)>` as
-text, which silently failed for folders with `#` or `%` in the name.
+Where the file goes: a window that already shows it (any tabpage) wins. Otherwise the
+current window, if its buffer may be replaced there — not floating, an ordinary buffer,
+no `winfixbuf` — else the first such window of the tabpage, else a new split. A window
+whose unsaved buffer would have to be abandoned gets a split as well. If the instance is
+in Insert, Visual, Command-line or Terminal mode, it is returned to Normal mode first.
 
-The snippets run `:silent`. `:cd` echoes the new directory; a path wider than the
-window raises a hit-enter prompt and leaves the instance waiting for a key, deaf to
-further RPC.
+## A slow open is not a refusal
 
-### A pipe that is not there
+Once the request has been written to an instance, the target is never sent to another
+one unless that instance answers with an error or closes the connection. The launcher
+waits, hidden, up to 15 seconds for the answer; without one it exits with code 0,
+because the instance has the request (a large file, an LSP start, a swap-file dialog).
+Giving up early and trying the next instance opened the file twice; closing the
+connection early dropped the queued request.
 
-`NamedPipeClientStream.Connect` waits for its whole timeout for a pipe that does not
-exist, so the RPC client first looks the name up in the pipe namespace (milliseconds) and
-gives up at once. A configured `NVIM_SERVER` nobody listens on therefore costs nothing
-extra before a new instance is started (measured: 3.4 s before, 0.4 s after, including
-the PowerShell start).
+For the same reason only a failure *before* the instance has taken the target counts as
+an error: an autocommand that fails after the buffer is on screen does not send the file
+to a second instance.
+
+## Starting a new instance
+
+Neovim is a console program, so it needs a terminal: WezTerm, Windows Terminal, or a
+console of its own (`nvim.exe` started directly by the window-less launcher gets one).
+`cmd.exe` is never involved: it expands `%VAR%` inside quoted arguments and refuses a
+UNC working directory. Every argument is quoted by the rules `CommandLineToArgvW` uses,
+the file follows `--` so a name starting with `-` is not read as an option, and for
+Windows Terminal a `;` is written `\;` (its command separator).
+
+A new instance gets no `--listen`: it has its default pipe and the next click finds it.
+The one exception is a pipe `NVIM_SERVER` nobody serves yet. Programs are looked up on
+`PATH` only, never in the working directory, which is whatever folder was clicked.
+
+## Installation
+
+`install.ps1` runs `build.ps1`, writes the ini with the detected `nvim.exe`, and writes
+six registry keys through the .NET registry API (`*` is a real key name, so there is no
+PowerShell path wildcarding to trip over). The commands name the exe by its absolute,
+quoted path. A manifest in the install folder lists what was put there, so
+`uninstall.ps1 -RemoveFiles` deletes exactly that and never recurses. The registry root
+is a parameter (`-ClassesKey`), which is how the test suite exercises install and
+uninstall against a throw-away key.
 
 ## Raising the window
 
 `FOCUS_TERMINAL` (off by default) walks the process tree upward from the editor core —
-core, UI client, shell, terminal host — to the first process that owns a window, then
-raises it. Windows only lets the foreground process hand the foreground over, so the call
-attaches this thread's input to the foreground window's thread for a moment. The walk is a
-pure function over a parent map, which is what the tests cover; the Win32 call needs a
-real window and is checked by hand.
-
-## Command-line fallback
-
-Only for addresses the RPC client cannot use (a TCP `NVIM_SERVER`; for a pipe the command
-line could not do better than RPC, only slower): `nvim --server
-<addr> --remote <file>` for files, `--remote-send` with a `:cd | :edit .` command for
-folders. Every call runs with a time limit and kills only its own process tree, because
-the launcher runs hidden and a hang would never be seen. In `--remote-send` text a
-literal `<` is sent as `<lt>` so a file name cannot be read as key notation.
-
-## Starting a new instance
-
-When nothing took the target, `open-in-nvim-current.ps1` starts Neovim in a terminal
-with `--listen \\.\pipe\nvim-%USERNAME%` (omitted when that name is already taken, or
-the new instance would fail to listen) and the file after `--`. The terminal command is
-built by `Invoke-Spawn`, which quotes every argument with the rules
-`CommandLineToArgvW` uses — `Start-Process -ArgumentList` joins an array with plain
-spaces, so `C:\My Dir` would arrive as two arguments.
-
-## Windows PowerShell 5.1 traps
-
-The launchers are written for 5.1, the version every Windows has. Four things there
-fail silently or confusingly, and each cost a real bug:
-
-- A function parameter named `$args` **does not bind**; the automatic variable stays
-  empty. The first version started a new Neovim without the file for this reason.
-  The parameters are called `$launchArgs` / `$nvimArgs`.
-- `Start-Process -ArgumentList` rejects an empty-string element, and joins the rest
-  with plain spaces.
-- Output written with `Write-Output` inside a function used in an `if (...)` becomes
-  that function's return value; diagnostics use `[Console]::Out.WriteLine`.
-- `"... $key: ..."` is a parse error; write `${key}:`.
-
-Parsing under PowerShell 7 proves nothing about 5.1: the test suite runs under
-`powershell.exe`.
+core, UI client, shell, terminal host — to the first process that owns a visible, titled
+top-level window, and raises it. Windows keeps a parent id after the parent exits and
+reuses ids, so a "parent" younger than its child ends the walk. The launcher was started
+by the user's click, which is what allows it to hand the foreground on. Several windows
+of one terminal process cannot be told apart.
 
 ## Safety nets for tests
 
-`OPEN_IN_NVIM_ONLY_PIDS` restricts discovery to a PID list *and* switches off the
-per-user pipe name, because that name is not PID based and could reach a real
-session. `OPEN_IN_NVIM_NO_SPAWN` makes a missing instance an exit code instead of a
-window. The tests start their own `nvim --embed` instances and only ever stop
-processes that started during the run.
-
-## Why the library is required
-
-Both launchers need the same quoting and spawn helpers, and the current-instance one
-the RPC client. An earlier version treated the lib as optional; the "without" path was
-never exercised, so there is one path now.
+`OPEN_IN_NVIM_ONLY_PIDS` restricts every contact to a PID list, including through the
+stable pipe and a pipe `NVIM_SERVER`; a TCP address is refused in that mode unless
+`OPEN_IN_NVIM_ALLOW_TCP` is set. `OPEN_IN_NVIM_NO_SPAWN` makes a missing instance an
+exit code instead of a window, `OPEN_IN_NVIM_NO_UI` suppresses the two windows the
+program can show. The tests start their own `nvim --embed` instances, fake the
+`USERNAME`, and only ever stop processes they started.
