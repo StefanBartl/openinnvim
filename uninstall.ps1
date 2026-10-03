@@ -1,6 +1,6 @@
 # uninstall.ps1
 # Removes the context-menu entries written by install.ps1 (under HKCU) and, with -RemoveFiles, the files it
-# copied. File removal follows the manifest in the install folder, never a recursive delete, and never
+# put there. File removal follows the manifest in the install folder, never a recursive delete, and never
 # touches a folder that is the repository itself.
 #
 # Usage:
@@ -11,7 +11,7 @@
 param(
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'OpenInNvim'),
   [string]$ClassesKey = 'Software\Classes',
-  # Also delete the launcher files listed in the manifest.
+  # Also delete the files listed in the manifest.
   [switch]$RemoveFiles,
   # Also delete the config file (it is yours: kept unless you ask).
   [switch]$RemoveConfig,
@@ -22,7 +22,9 @@ $ErrorActionPreference = 'Stop'
 
 $Source = $PSScriptRoot
 if (-not $Source -or $Source -eq '') { $Source = (Split-Path -Path $MyInvocation.MyCommand.Path -Parent) }
-$InstallDir = $InstallDir.TrimEnd('\', '/')
+$Source = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+$InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+$InstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
 
 function Write-Step {
   param([string]$Text)
@@ -55,7 +57,7 @@ Write-Host "Context-menu entries removed: $removed"
 
 if ($RemoveFiles) {
   $manifest = Join-Path $InstallDir 'install.manifest.txt'
-  $inPlace = ($InstallDir -ieq $Source.TrimEnd('\', '/')) -or (Test-Path -LiteralPath (Join-Path $InstallDir '.git'))
+  $inPlace = ($InstallDir -ieq $Source) -or (Test-Path -LiteralPath (Join-Path $InstallDir '.git'))
   if ($inPlace) {
     Write-Warning "$InstallDir is the repository itself: files are left alone."
   } elseif (-not (Test-Path -LiteralPath $manifest)) {
@@ -64,11 +66,12 @@ if ($RemoveFiles) {
     foreach ($f in (Get-Content -LiteralPath $manifest)) {
       $f = $f.Trim()
       if ($f -eq '' -or $f -ne (Split-Path -Leaf $f)) { continue }          # plain file names only
-      if ($f -like '*.config.ps1' -and -not $RemoveConfig) { Write-Host "Config kept: $(Join-Path $InstallDir $f)"; continue }
+      $isConfig = ($f -like '*.ini') -or ($f -like '*.config.ps1')
+      if ($isConfig -and -not $RemoveConfig) { Write-Host "Config kept: $(Join-Path $InstallDir $f)"; continue }
       $target = Join-Path $InstallDir $f
-      if (Test-Path -LiteralPath $target) { Write-Step "Delete $target"; if (-not $DryRun) { Remove-Item -LiteralPath $target -Force } }
+      if (Test-Path -LiteralPath $target) { Write-Step "Delete $target"; if (-not $DryRun) { [IO.File]::Delete($target) } }
     }
-    if (-not $DryRun) { Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue }
+    if (-not $DryRun) { [IO.File]::Delete($manifest) }
     # Only an empty folder is removed.
     if (-not $DryRun -and (Test-Path -LiteralPath $InstallDir) -and -not (Get-ChildItem -LiteralPath $InstallDir -Force)) {
       [IO.Directory]::Delete($InstallDir, $false)

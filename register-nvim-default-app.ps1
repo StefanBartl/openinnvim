@@ -3,7 +3,7 @@
 # English comments are used throughout as requested.
 
 param(
-    [string]$InstallPath = $PSScriptRoot
+    [string]$InstallPath = (Join-Path $env:LOCALAPPDATA 'OpenInNvim')
 )
 
 # Stop on first error to avoid partial registry changes.
@@ -45,26 +45,21 @@ while ($true) {
 }
 # --- END USER PROMPT ---
 
-# Determine which VBS script to use based on chosen mode.
-$vbsScript = if ($Mode -eq 'new') {
-    Join-Path $InstallPath 'open-in-nvim.vbs'
-} else {
-    Join-Path $InstallPath 'open-in-nvim-current.vbs'
+# The launcher built by install.ps1 (default folder %LOCALAPPDATA%\OpenInNvim, or <repo>/bin in place).
+$launcher = Join-Path $InstallPath 'OpenInNvim.exe'
+if (-not (Test-Path -LiteralPath $launcher)) { $launcher = Join-Path (Join-Path $InstallPath 'bin') 'OpenInNvim.exe' }
+if (-not (Test-Path -LiteralPath $launcher)) {
+    throw "OpenInNvim.exe not found in $InstallPath (run install.ps1 first, or pass -InstallPath)."
 }
-
-# Validate that the VBS file exists before attempting to write registry entries.
-if (-not (Test-Path -LiteralPath $vbsScript)) {
-    throw "VBS script not found: $vbsScript"
-}
+$launcher = [IO.Path]::GetFullPath($launcher)
 
 # ProgID and display name
 $progId = "Neovim.TextFile"
 $appName = if ($Mode -eq 'new') { "Neovim (new instance)" } else { "Neovim (current instance)" }
 
-# Icon and command. Use full paths and quote arguments properly.
-$nvimIcon = "C:\Program Files\Neovim\bin\nvim.exe,0"
-$wscript = "wscript.exe"
-$command = "$wscript //nologo `"$vbsScript`" `"%1`""
+# Icon and command. The program by its full, quoted path: nothing is looked up at click time.
+$nvimIcon = "$launcher,0"
+$command = "`"$launcher`" $Mode `"%1`""
 
 Write-Host "`nRegistering Neovim as a default application..."
 Write-Host "Selected mode: $appName"
@@ -119,10 +114,3 @@ Write-Host "2. Search for: $appName"
 Write-Host "3. Choose the file types Neovim should open by default"
 Write-Host "`nAlternatively: right-click a file -> Open with -> Choose another app -> '$appName'"
 Write-Host "            and tick 'Always use this app'"
-
-
-
-
-
-
-
