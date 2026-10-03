@@ -33,7 +33,8 @@ namespace OpenInNvim
                 return 3;
             }
 
-            SpawnPlan plan = Plan(target, cfg, listenPipe);
+            string path = FullPath(hooks);
+            SpawnPlan plan = Plan(target, cfg, listenPipe, path);
             if (plan == null)
             {
                 string text = "Neovim not found (NVIM_BIN = " + cfg.NvimBin + ")";
@@ -44,7 +45,7 @@ namespace OpenInNvim
                 return 1;
             }
 
-            SpawnPlan[] launches = Wrap(plan, cfg);
+            SpawnPlan[] launches = Wrap(plan, cfg, path);
 
             if (hooks.SpawnDryRun)
             {
@@ -71,6 +72,8 @@ namespace OpenInNvim
                     if (Directory.Exists(l.WorkDir)) { psi.WorkingDirectory = l.WorkDir; }
                     // A console program started by this window-less process gets a console of its own.
                     psi.CreateNoWindow = false;
+                    // The editor (and the terminal) get the complete PATH, not Explorer's possibly cut one.
+                    psi.EnvironmentVariables["PATH"] = path;
                     using (Process p = Process.Start(psi)) { }
                     Log.Line("started via " + l.Terminal + ": " + l.Exe + " " + l.Arguments);
                     return 0;
@@ -92,6 +95,11 @@ namespace OpenInNvim
         /// </summary>
         public static SpawnPlan Plan(Target target, Config cfg, string listenPipe)
         {
+            return Plan(target, cfg, listenPipe, Environment.GetEnvironmentVariable("PATH"));
+        }
+
+        public static SpawnPlan Plan(Target target, Config cfg, string listenPipe, string pathVariable)
+        {
             string nvim = null;
             try
             {
@@ -100,8 +108,8 @@ namespace OpenInNvim
                 if (!string.IsNullOrEmpty(cfg.NvimBin) && Path.IsPathRooted(cfg.NvimBin) && File.Exists(cfg.NvimBin)) { nvim = Path.GetFullPath(cfg.NvimBin); }
             }
             catch (Exception) { nvim = null; }
-            if (nvim == null && !string.IsNullOrEmpty(cfg.NvimBin) && cfg.NvimBin.IndexOfAny(new char[] { '\\', '/', ':' }) < 0) { nvim = CommandLine.FindOnPath(cfg.NvimBin); }
-            if (nvim == null) { nvim = CommandLine.FindOnPath("nvim"); }
+            if (nvim == null && !string.IsNullOrEmpty(cfg.NvimBin) && cfg.NvimBin.IndexOfAny(new char[] { '\\', '/', ':' }) < 0) { nvim = CommandLine.FindOnPath(cfg.NvimBin, pathVariable); }
+            if (nvim == null) { nvim = CommandLine.FindOnPath("nvim", pathVariable); }
             if (nvim == null) { return null; }
 
             List<string> args = new List<string>();
@@ -172,6 +180,62 @@ namespace OpenInNvim
             console.WorkDir = nvim.WorkDir;
             list.Add(console);
             return list.ToArray();
+        }
+
+        /// <summary>
+        /// PATH as a freshly opened terminal would have it: the inherited value plus every entry of the
+        /// machine and user PATH in the registry that is missing from it. Explorer hands its children a
+        /// PATH that is cut short when the user PATH is very long (thousands of characters), and then
+        /// neither the terminal nor git is found although both are installed.
+        /// </summary>
+        public static string FullPath(Hooks hooks)
+        {
+            string inherited = Environment.GetEnvironmentVariable("PATH") ?? "";
+            if (hooks.NoPathRefresh) { return inherited; }
+            try
+            {
+                string machine = ReadPath(Microsoft.Win32.Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+                string user = ReadPath(Microsoft.Win32.Registry.CurrentUser, "Environment");
+                return MergePath(inherited, machine + ";" + user);
+            }
+            catch (Exception ex)
+            {
+                Log.Line("PATH not refreshed: " + ex.Message);
+                return inherited;
+            }
+        }
+
+        private static string ReadPath(Microsoft.Win32.RegistryKey root, string subKey)
+        {
+            using (Microsoft.Win32.RegistryKey key = root.OpenSubKey(subKey))
+            {
+                if (key == null) { return ""; }
+                // GetValue expands %VAR% of a REG_EXPAND_SZ value by default.
+                object value = key.GetValue("Path");
+                return value == null ? "" : value.ToString();
+            }
+        }
+
+        /// <summary>The first list, then the entries of the second that it lacks (compared without case and trailing separator).</summary>
+        public static string MergePath(string first, string second)
+        {
+            List<string> result = new List<string>();
+            Dictionary<string, bool> seen = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            string[] lists = new string[] { first ?? "", second ?? "" };
+            for (int l = 0; l < lists.Length; l++)
+            {
+                string[] parts = lists[l].Split(';');
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    string entry = parts[i].Trim();
+                    if (entry.Length == 0) { continue; }
+                    string key = entry.Trim('"').TrimEnd('\\', '/');
+                    if (seen.ContainsKey(key)) { continue; }
+                    seen[key] = true;
+                    result.Add(entry);
+                }
+            }
+            return string.Join(";", result.ToArray());
         }
 
         private static string Tail(string arguments)

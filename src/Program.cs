@@ -24,6 +24,8 @@ namespace OpenInNvim
         public bool NoSpawn;
         /// <summary>OPEN_IN_NVIM_NO_UI: no message boxes.</summary>
         public bool NoUi;
+        /// <summary>OPEN_IN_NVIM_NO_PATH_REFRESH: use PATH exactly as inherited (tests control it).</summary>
+        public bool NoPathRefresh;
         /// <summary>OPEN_IN_NVIM_ALLOW_TCP: a TCP NVIM_SERVER may be used although ONLY_PIDS is set.</summary>
         public bool AllowTcp;
         /// <summary>OPEN_IN_NVIM_ONLY_PIDS: the only processes that may ever be contacted; null = no limit.</summary>
@@ -43,6 +45,7 @@ namespace OpenInNvim
             h.NoSpawn = IsSet("OPEN_IN_NVIM_NO_SPAWN");
             h.NoUi = IsSet("OPEN_IN_NVIM_NO_UI");
             h.AllowTcp = IsSet("OPEN_IN_NVIM_ALLOW_TCP");
+            h.NoPathRefresh = IsSet("OPEN_IN_NVIM_NO_PATH_REFRESH");
             h.OnlyPids = ParsePids(Environment.GetEnvironmentVariable("OPEN_IN_NVIM_ONLY_PIDS"));
             int pick;
             if (int.TryParse(Environment.GetEnvironmentVariable("OPEN_IN_NVIM_PICK"), NumberStyles.None, CultureInfo.InvariantCulture, out pick)) { h.PickIndex = pick; }

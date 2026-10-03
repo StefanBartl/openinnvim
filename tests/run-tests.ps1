@@ -571,7 +571,7 @@ return true
     #>
     param([string]$ArgLine, [hashtable]$Env = @{}, [string]$Cwd = $tmp)
     $all = @{
-      OPEN_IN_NVIM_ONLY_PIDS = $editors; OPEN_IN_NVIM_NO_SPAWN = '1'; OPEN_IN_NVIM_NO_UI = '1'; USERNAME = $fakeUser
+      OPEN_IN_NVIM_ONLY_PIDS = $editors; OPEN_IN_NVIM_NO_SPAWN = '1'; OPEN_IN_NVIM_NO_UI = '1'; USERNAME = $fakeUser; OPEN_IN_NVIM_NO_PATH_REFRESH = '1'
       OPEN_IN_NVIM_DRYRUN = $null; OPEN_IN_NVIM_SPAWN_DRYRUN = $null; OPEN_IN_NVIM_ALLOW_TCP = $null; OPEN_IN_NVIM_LOG = $runLog
     }
     foreach ($k in $Env.Keys) { $all[$k] = $Env[$k] }
@@ -1121,6 +1121,11 @@ return true
   Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = $wezCfg }
   $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA })))
   Assert-That 'WEZTERM_BIN from the config wins over PATH' (($via.Count -ge 1) -and ($via[0] -like ('wezterm ' + $wezCfg + ' *'))) ("via=" + ($via -join ' / '))
+
+  Assert-That 'PATH merge: inherited entries first, missing registry entries appended once' ([OpenInNvim.Spawner]::MergePath('C:;C:', 'c:\B;C:\c;;C:') -eq 'C:;C:\;C:\c')
+  Set-Ini @{ NVIM_BIN = $nvim }
+  $res = Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA; OPEN_IN_NVIM_NO_PATH_REFRESH = $null })
+  Assert-That 'a cut-short inherited PATH is completed from the registry (dry run still exits 0)' ($res.Code -eq 0) ("out=" + $res.Text)
 
   # -------------------------------------------------------------------------------------------
   Write-Host '== chooser (INSTANCE_PICK = ask) and focus'
