@@ -14,6 +14,8 @@ param(
   # Registry keys below HKCU. Only tests change them.
   [string]$ClassesKey = 'Software\Classes',
   [string]$SoftwareKey = 'Software',
+  # The "Apps" entry OpenInNvim-Setup.exe writes. Only tests change it.
+  [string]$UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenInNvim',
   # Also delete the files listed in the manifest.
   [switch]$RemoveFiles,
   # Also delete the config file (it is yours: kept unless you ask).
@@ -83,6 +85,12 @@ foreach ($id in $progIds) {
   }
 }
 Write-Host "Default-app registrations removed: $removedProgIds"
+
+# The "Settings > Apps" entry of OpenInNvim-Setup.exe (its uninstall.exe is removed with the files below).
+if (Test-RegKey $UninstallKey) {
+  Write-Step "Remove HKCU\$UninstallKey"
+  if (-not $DryRun) { $hkcu.DeleteSubKeyTree($UninstallKey, $false) }
+}
 
 . (Join-Path $Source 'shell-notify.ps1')
 if (-not $DryRun) { Send-AssocChanged -Skip:($ClassesKey -ne 'Software\Classes') }

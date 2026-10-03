@@ -24,9 +24,9 @@ ready-made setup files for each supported system, built by GitHub Actions, with 
 
 | Step | Effort |
 | --- | --- |
-| Release workflow: on a tag, build `OpenInNvim.exe` on `windows-latest` (same `csc` call as `build.ps1`), run the test suite, attach the exe and a zip (exe, ini template, install/uninstall scripts) with SHA-256 sums | 0.5 |
-| Setup program (Inno Setup): per-user install without administrator rights, writes the six menu entries and the ini, registers an uninstaller under "Apps", offers the default-app registration as an option | 1 |
-| Version number in the exe and `OpenInNvim.exe --version`; a changelog file the release notes are taken from | 0.5 |
+| ~~Release workflow~~ **Written, not yet run:** `.github/workflows/release.yml` builds on `windows-latest` on a tag `v*`, runs the test suite and attaches `OpenInNvim-Setup.exe` + `SHA256SUMS.txt` to a draft release. Needs the first tag and a look at the draft. | 0.5 |
+| ~~Setup program~~ **Done (2026-10-03):** `OpenInNvim-Setup.exe` with `uninstall.exe` inside, built by `build-setup.ps1` with the Windows C# compiler (own program instead of Inno Setup: no external tool, same toolchain as the launcher). Per user, entries, ini, optional default-app registration, entry under "Apps"; 19 checks in `tests\run-tests.ps1` | 1 |
+| ~~Version number~~ **Done:** one line in `VERSION`, compiled into all three exes (file properties). Still open: `OpenInNvim.exe --version`; a changelog file the release notes are taken from | 0.25 |
 
 Open question: the setup is not code-signed, so Windows SmartScreen warns on first run. A
 certificate costs money every year; until there is one the release notes say so and list the

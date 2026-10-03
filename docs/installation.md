@@ -1,5 +1,31 @@
 # Installation
 
+Two ways: the **setup program** (nothing else to download) or the **script** (builds from a clone).
+
+## Setup program (recommended)
+
+`OpenInNvim-Setup.exe` carries everything: the launcher, `uninstall.exe`, the config template and the two
+icons. Double-click it, pick a folder and whether to register the default-app entries, click *Install*.
+Per user, no administrator rights, nothing is written outside `HKCU` and the install folder.
+
+| Command line | Effect |
+| --- | --- |
+| `OpenInNvim-Setup.exe /S` | Silent. The folder of an earlier install, otherwise `%LOCALAPPDATA%\OpenInNvim`. |
+| `/D=<folder>` | Install folder (absolute; a git repository is refused). |
+| `/DEFAULT=new` or `/DEFAULT=current` | Also register the default-app entries, with that mode for `Neovim.TextFile`. |
+| `/NVIM=<nvim.exe>` | Use this Neovim instead of searching (`PATH`, official installer, winget, scoop). |
+| `/LOG=<file>` | Write what happened to a file. |
+
+An existing `open-in-nvim.ini` is kept (it is yours). Running the setup again updates the program, also
+while a launcher is running. The program is listed under *Settings > Apps* and as `uninstall.exe` in the
+install folder: it asks, removes the menu entries, the default-app entries, the *Apps* entry and the files,
+keeps your ini (unless you tick the box, or pass `/REMOVECONFIG`) and removes the folder when it is empty.
+`uninstall.exe /S` is the silent form. Both programs are built by `build-setup.ps1` (see the README); the
+setup is **not code-signed**, so Windows SmartScreen may warn on first run, and the release notes list the
+SHA-256 checksum to compare.
+
+## Script (from a clone)
+
 One script. It builds `OpenInNvim.exe` into a folder of your own, finds `nvim.exe`,
 writes the config and registers the six context-menu entries. Nothing is installed
 system-wide and no administrator rights are needed — everything lives under `HKCU` and

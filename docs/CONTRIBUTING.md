@@ -43,7 +43,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
 ```
 
 Run it under Windows PowerShell 5.1. It needs `nvim.exe` at
-`C:\Program Files\Neovim\bin\nvim.exe` or in `$env:NVIM_EXE`. The suite (250 checks at
+`C:\Program Files\Neovim\bin\nvim.exe` or in `$env:NVIM_EXE`. The suite (about 290 checks at
 the time of writing) builds the exe into a temporary folder, calls its public static
 methods through reflection (unit tests), and then runs it against its **own** throw-away
 Neovim instances (`tests\fixture.lua`: `nvim --embed` cores with a UI attached, plus two

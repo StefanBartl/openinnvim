@@ -1298,6 +1298,90 @@ return true
   }
 
   # -------------------------------------------------------------------------------------------
+  Write-Host '== OpenInNvim-Setup.exe / uninstall.exe (throw-away registry keys and folder)'
+  $setupOut = [string](Join-Path $tmp 'setup dist')
+  $sb = Invoke-Bounded -Exe $ps51 -ArgLine ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'build-setup.ps1') + '" -OutDir "' + $setupOut + '"') -LimitMs 180000
+  $setupExe = Join-Path $setupOut 'OpenInNvim-Setup.exe'
+  Assert-That 'build-setup.ps1 exits 0 and prints the setup exe path' (($sb.Code -eq 0) -and ($sb.Lines.Count -ge 1) -and ($sb.Lines[-1] -eq $setupExe) -and [IO.File]::Exists($setupExe)) ("code=$($sb.Code) out=$($sb.Text) err=$($sb.Err)")
+  $sumLine = ''
+  if ([IO.File]::Exists((Join-Path $setupOut 'SHA256SUMS.txt'))) { $sumLine = [IO.File]::ReadAllLines((Join-Path $setupOut 'SHA256SUMS.txt'))[0] }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  $setupHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($setupExe)))).Replace('-', '').ToLowerInvariant()
+  Assert-That 'SHA256SUMS.txt holds the hash of the setup exe' ($sumLine -eq ($setupHash + ' *OpenInNvim-Setup.exe')) ("line=$sumLine")
+  $expectVersion = ([IO.File]::ReadAllText((Join-Path $Root 'VERSION'))).Trim()
+  Assert-That 'the setup exe carries the version of the VERSION file' ([Diagnostics.FileVersionInfo]::GetVersionInfo($setupExe).ProductVersion -eq $expectVersion) ("got=" + [Diagnostics.FileVersionInfo]::GetVersionInfo($setupExe).ProductVersion)
+
+  $sReg = 'Software\oin_setup_test_' + $tag
+  $sSw = $sReg + '_sw'
+  $sUn = $sReg + '_un'
+  $sKeys = '"/CLASSESKEY=' + $sReg + '" "/SOFTWAREKEY=' + $sSw + '" "/UNINSTALLKEY=' + $sUn + '"'
+  $sDir = [string](Join-Path $tmp 'setup inst dir')
+  function Get-SetupValue { param([string]$Sub, [string]$Name = '') $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub); if (-not $k) { return $null }; try { return $k.GetValue($Name) } finally { $k.Close() } }
+  function Wait-SetupGone {
+    # uninstall.exe hands over to a copy in %TEMP% and exits: wait until the uninstall key and the launcher are gone.
+    param([string]$Dir, [int]$Ms = 15000)
+    $w = [Diagnostics.Stopwatch]::StartNew()
+    while ($w.ElapsedMilliseconds -lt $Ms) {
+      if (($null -eq (Get-SetupValue $sUn 'DisplayName')) -and (-not [IO.File]::Exists((Join-Path $Dir 'uninstall.exe'))) -and (-not [IO.File]::Exists((Join-Path $Dir 'OpenInNvim.exe')))) { Start-Sleep -Milliseconds 300; return $true }
+      Start-Sleep -Milliseconds 200
+    }
+    return $false
+  }
+  try {
+    Set-RegValue ($sReg + '\*\shell\Foreign_Verb\command') '' 'foreign.exe "%1"'
+    Set-RegValue ($sReg + '\Neovim.TextFile.Other') '' 'foreign progid'
+    Set-RegValue ($sSw + '\RegisteredApplications') 'Foreign.App' 'Software\Foreign\Capabilities'
+    $sLog = Join-Path $tmp 'setup.log'
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=' + $sDir + '" "/NVIM=' + $nvim + '" /DEFAULT=current "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    $sExe = Join-Path $sDir 'OpenInNvim.exe'
+    $logText = ''
+    if ([IO.File]::Exists($sLog)) { $logText = [IO.File]::ReadAllText($sLog) }
+    Assert-That 'setup /S: exit 0, launcher, uninstaller, icons, ini and manifest written' (($r.Code -eq 0) -and [IO.File]::Exists($sExe) -and [IO.File]::Exists((Join-Path $sDir 'uninstall.exe')) -and [IO.File]::Exists((Join-Path $sDir 'new-session.ico')) -and [IO.File]::Exists((Join-Path $sDir 'current-session.ico')) -and [IO.File]::Exists((Join-Path $sDir 'open-in-nvim.ini')) -and [IO.File]::Exists((Join-Path $sDir 'install.manifest.txt'))) ("code=$($r.Code) log=$logText err=$($r.Err)")
+    Assert-That 'setup: the installed launcher is the real one (dry run lists candidates)' ((Invoke-Bounded -Exe $sExe -ArgLine ('current "' + $target + '"') -Env @{ OPEN_IN_NVIM_ONLY_PIDS = $editors; OPEN_IN_NVIM_NO_SPAWN = '1'; OPEN_IN_NVIM_NO_UI = '1'; USERNAME = $fakeUser; OPEN_IN_NVIM_DRYRUN = '1' } -Cwd $tmp).Lines.Count -ge 1)
+    Assert-That 'setup: the ini names the given nvim.exe' (@([IO.File]::ReadAllLines((Join-Path $sDir 'open-in-nvim.ini')) | Where-Object { $_ -eq ('NVIM_BIN = ' + $nvim) }).Count -eq 1)
+    Assert-That 'setup: menu commands name the launcher by its full quoted path (file, folder, background)' (((Get-SetupValue ($sReg + '\*\shell\Open_in_Neovim_current\command')) -eq ('"' + $sExe + '" current "%1"')) -and ((Get-SetupValue ($sReg + '\Directory\shell\Open_in_Neovim_new\command')) -eq ('"' + $sExe + '" new "%1"')) -and ((Get-SetupValue ($sReg + '\Directory\Background\shell\Open_in_Neovim_current\command')) -eq ('"' + $sExe + '" current "%V"')))
+    Assert-That 'setup: all three ProgIDs open the launcher, each with its own mode' (((Get-SetupValue ($sReg + '\Neovim.TextFile\shell\open\command')) -eq ('"' + $sExe + '" current "%1"')) -and ((Get-SetupValue ($sReg + '\Neovim.TextFile.New\shell\open\command')) -eq ('"' + $sExe + '" new "%1"')) -and ((Get-SetupValue ($sReg + '\Neovim.TextFile.Current\shell\open\command')) -eq ('"' + $sExe + '" current "%1"')))
+    . (Join-Path $Root 'file-extensions.ps1')
+    $faKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sSw + '\Neovim.TextFile\Capabilities\FileAssociations')
+    $faCount = -1; if ($faKey) { $faCount = $faKey.ValueCount; $faKey.Close() }
+    Assert-That 'setup: the default-app file types are exactly the list of file-extensions.ps1' ($faCount -eq @($extensions | Select-Object -Unique).Count) ("registered=$faCount list=" + @($extensions | Select-Object -Unique).Count)
+    Assert-That 'setup: Settings > Apps entry (name, version, uninstaller, quiet uninstaller, no modify)' (((Get-SetupValue $sUn 'DisplayName') -eq 'OpenInNvim') -and ((Get-SetupValue $sUn 'DisplayVersion') -eq $expectVersion) -and ((Get-SetupValue $sUn 'UninstallString') -eq ('"' + (Join-Path $sDir 'uninstall.exe') + '"')) -and ((Get-SetupValue $sUn 'QuietUninstallString') -eq ('"' + (Join-Path $sDir 'uninstall.exe') + '" /S')) -and ((Get-SetupValue $sUn 'InstallLocation') -eq $sDir) -and ((Get-SetupValue $sUn 'NoModify') -eq 1))
+
+    # Again: the config is yours, a second run keeps it.
+    [IO.File]::AppendAllText((Join-Path $sDir 'open-in-nvim.ini'), "`r`n# mine`r`n")
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=' + $sDir + '" "/NVIM=' + $nvim + '" "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    Assert-That 'setup again: exit 0, the existing ini is kept' (($r.Code -eq 0) -and ([IO.File]::ReadAllText((Join-Path $sDir 'open-in-nvim.ini')).Contains('# mine')))
+    # Bad folders: nothing is written.
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=relative\folder" "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    Assert-That 'setup with a relative folder: refused (exit 1)' ($r.Code -eq 1)
+    $repoLike = [string](Join-Path $tmp 'looks like a repo'); [void][IO.Directory]::CreateDirectory((Join-Path $repoLike '.git'))
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=' + $repoLike + '" "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    Assert-That 'setup into a git repository: refused, nothing written' (($r.Code -eq 1) -and (-not [IO.File]::Exists((Join-Path $repoLike 'OpenInNvim.exe'))))
+
+    # Uninstall: through the exe the "Apps" entry points at.
+    $uLog = Join-Path $tmp 'uninstall.log'
+    $r = Invoke-Bounded -Exe (Join-Path $sDir 'uninstall.exe') -ArgLine ('/S "/LOG=' + $uLog + '" ' + $sKeys) -LimitMs 60000
+    $gone = Wait-SetupGone $sDir
+    $uText = ''; if ([IO.File]::Exists($uLog)) { $uText = [IO.File]::ReadAllText($uLog) }
+    Assert-That 'uninstall /S: stage 1 exits 0, the Apps entry and the files go' (($r.Code -eq 0) -and $gone) ("code=$($r.Code) log=$uText")
+    Assert-That 'uninstall: menu entries, ProgIDs, Capabilities and RegisteredApplications values are gone' (($null -eq (Get-SetupValue ($sReg + '\*\shell\Open_in_Neovim_current\command'))) -and ($null -eq [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sReg + '\Neovim.TextFile')) -and ($null -eq [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sSw + '\Neovim.TextFile.New')) -and ($null -eq (Get-SetupValue ($sSw + '\RegisteredApplications') 'Neovim.TextFile.Current')))
+    Assert-That 'uninstall: your config is kept, the folder stays with it' ([IO.File]::Exists((Join-Path $sDir 'open-in-nvim.ini')) -and (@([IO.Directory]::GetFileSystemEntries($sDir)).Count -eq 1))
+    Assert-That 'uninstall: foreign entries are untouched' (((Get-SetupValue ($sReg + '\*\shell\Foreign_Verb\command')) -eq 'foreign.exe "%1"') -and ((Get-SetupValue ($sReg + '\Neovim.TextFile.Other')) -eq 'foreign progid') -and ((Get-SetupValue ($sSw + '\RegisteredApplications') 'Foreign.App') -eq 'Software\Foreign\Capabilities'))
+
+    # Install again, uninstall with /REMOVECONFIG: the folder goes too. Also: uninstall.ps1 reads a setup install.
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=' + $sDir + '" "/NVIM=' + $nvim + '" "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    $r = Invoke-Bounded -Exe (Join-Path $sDir 'uninstall.exe') -ArgLine ('/S /REMOVECONFIG "/LOG=' + $uLog + '" ' + $sKeys) -LimitMs 60000
+    $w = [Diagnostics.Stopwatch]::StartNew(); while ($w.ElapsedMilliseconds -lt 15000 -and [IO.Directory]::Exists($sDir)) { Start-Sleep -Milliseconds 200 }
+    Assert-That 'uninstall /S /REMOVECONFIG: the config and the then empty folder go too' ((-not [IO.Directory]::Exists($sDir)) -and ($null -eq (Get-SetupValue $sUn 'DisplayName')))
+    $r = Invoke-Bounded -Exe $setupExe -ArgLine ('/S "/D=' + $sDir + '" "/NVIM=' + $nvim + '" "/LOG=' + $sLog + '" ' + $sKeys) -LimitMs 60000
+    $res = Invoke-Script 'uninstall.ps1' ('-InstallDir "' + $sDir + '" -RemoveFiles -ClassesKey "' + $sReg + '" -SoftwareKey "' + $sSw + '" -UninstallKey "' + $sUn + '"')
+    Assert-That 'uninstall.ps1 undoes a setup install too (entries, Apps entry; the launcher goes by the manifest)' (($res.Code -eq 0) -and ($null -eq (Get-SetupValue $sUn 'DisplayName')) -and ($null -eq (Get-SetupValue ($sReg + '\Directory\shell\Open_in_Neovim_new\command'))) -and (-not [IO.File]::Exists((Join-Path $sDir 'OpenInNvim.exe')))) ("code=$($res.Code) out=$($res.Text) err=$($res.Err)")
+  }
+  finally {
+    foreach ($x in $sReg, $sSw, $sUn) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($x, $false) } catch {} }
+  }
+
+  # -------------------------------------------------------------------------------------------
   Write-Host '== timing (information only)'
   Reset-Instance $g2
   $times = @()

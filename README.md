@@ -28,6 +28,17 @@ program, `OpenInNvim.exe`, which talks to Neovim over its own RPC pipe. No Neovi
 external tool are required; the program is built at install time with the C# compiler that ships
 with Windows.
 
+## Install
+
+Download `OpenInNvim-Setup.exe` from the [releases](https://github.com/StefanBartl/openinnvim/releases)
+and run it: per user, no administrator rights, and it brings its own `uninstall.exe` (also listed under
+*Settings > Apps*). Not code-signed, so SmartScreen may warn; compare the SHA-256 from the release.
+No clone needed. From a clone instead: `install.ps1`, see [docs/installation.md](docs/installation.md).
+
+`build-setup.ps1` builds the setup (`dist\OpenInNvim-Setup.exe` + `SHA256SUMS.txt`) with the same C#
+compiler as the launcher: no Inno Setup, no NuGet. The version is the one line in `VERSION`; the source is
+in `setup\`.
+
 ---
 
 ## Documentation
@@ -38,7 +49,7 @@ each page answers.
 **The Basics**
 
 - [Requirements](docs/requirements.md) — Windows, .NET Framework and Neovim, and the terminal that starts a new instance.
-- [Installation](docs/installation.md) — one script: build, config and the six registry entries; and the uninstaller.
+- [Installation](docs/installation.md) — the setup program (with its own uninstaller), or one script: build, config and the six registry entries.
 - [Quickstart](docs/quickstart.md) — the first click, and how to see what the launcher would do without opening anything.
 
 **Configuration**

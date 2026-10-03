@@ -1,0 +1,48 @@
+name: release
+
+# A tag v* builds the setup program, runs the tests and attaches OpenInNvim-Setup.exe and SHA256SUMS.txt
+# to a DRAFT release: nothing is public until the draft is published by hand.
+# Not signed: the release notes tell users to compare the checksum (see docs/installation.md).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches VERSION
+        shell: powershell
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ('v' + $v -ne '${{ github.ref_name }}') { throw "Tag ${{ github.ref_name }} does not match VERSION $v" }
+
+      - name: Install Neovim for the tests
+        shell: powershell
+        run: |
+          choco install neovim --no-progress -y
+          $nvim = 'C:\Program Files\Neovim\bin\nvim.exe'
+          if (-not (Test-Path $nvim)) { throw "nvim.exe not found at $nvim" }
+          & $nvim --version | Select-Object -First 1
+
+      - name: Tests
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
+
+      - name: Build the setup
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-setup.ps1
+
+      - name: Draft release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' dist\OpenInNvim-Setup.exe dist\SHA256SUMS.txt --draft --title '${{ github.ref_name }}' --notes 'Windows setup (per user, no administrator rights). Not code-signed: Windows SmartScreen may warn; compare the SHA-256 in SHA256SUMS.txt.'

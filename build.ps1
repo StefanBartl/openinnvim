@@ -15,13 +15,13 @@ $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+. (Join-Path $here 'version.ps1')
 if (-not $OutDir) { $OutDir = Join-Path $here 'bin' }
 # Absolute: csc resolves /out: against ITS working directory, which need not be the caller's.
 $OutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
 
-$csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not [IO.File]::Exists($csc)) { $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
-if (-not [IO.File]::Exists($csc)) {
+$csc = Get-OinCsc
+if (-not $csc) {
   Write-Host 'build.ps1: csc.exe not found under %SystemRoot%\Microsoft.NET\Framework64\v4.0.30319 (or Framework\)'
   exit 1
 }
@@ -44,8 +44,15 @@ $cscArgs = @(
   (Join-Path $src '*.cs')
 )
 
-$output = & $csc $cscArgs 2>&1
-$code = $LASTEXITCODE
+# The version comes from the VERSION file, through a throw-away AssemblyInfo source.
+$info = New-OinAssemblyInfo $here 'OpenInNvim'
+try {
+  $output = & $csc ($cscArgs + @($info)) 2>&1
+  $code = $LASTEXITCODE
+}
+finally {
+  if ([IO.File]::Exists($info)) { [IO.File]::Delete($info) }
+}
 foreach ($line in @($output)) { Write-Host "$line" }
 if ($code -ne 0 -or -not [IO.File]::Exists($exe)) {
   Write-Host "build.ps1: csc failed (exit code $code)"
