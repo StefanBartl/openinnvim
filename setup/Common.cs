@@ -114,6 +114,9 @@ namespace OpenInNvimSetup
                     default: a.Unknown.Add(raw); break;
                 }
             }
+            // /DEFAULT=yes (or 1, true) offers both entries; new|current names the mode of the generic
+            // Neovim.TextFile entry (the two single-mode entries are always both written).
+            if (a.DefaultMode == "yes" || a.DefaultMode == "1" || a.DefaultMode == "true") { a.DefaultMode = "current"; }
             if (a.DefaultMode != "" && a.DefaultMode != "new" && a.DefaultMode != "current" && a.DefaultMode != "none")
             {
                 a.Unknown.Add("/DEFAULT=" + a.DefaultMode);

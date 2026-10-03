@@ -5,14 +5,19 @@ Two ways: the **setup program** (nothing else to download) or the **script** (bu
 ## Setup program (recommended)
 
 `OpenInNvim-Setup.exe` carries everything: the launcher, `uninstall.exe`, the config template and the two
-icons. Double-click it, pick a folder and whether to register the default-app entries, click *Install*.
-Per user, no administrator rights, nothing is written outside `HKCU` and the install folder.
+icons. Double-click it, pick a folder, optionally tick *Also offer Neovim in Windows' "Default apps" and
+"Open with" lists*, click *Install*. Per user, no administrator rights, nothing is written outside `HKCU` and
+the install folder.
+
+The checkbox only adds two choices, "Neovim (new instance)" and "Neovim (current instance)", to Windows'
+lists: Windows does not let a program make itself the default, so you still pick one per file type yourself
+(Settings > Apps > Default apps). Nothing is switched for you, and the context menu works without it.
 
 | Command line | Effect |
 | --- | --- |
 | `OpenInNvim-Setup.exe /S` | Silent. The folder of an earlier install, otherwise `%LOCALAPPDATA%\OpenInNvim`. |
 | `/D=<folder>` | Install folder (absolute; a git repository is refused). |
-| `/DEFAULT=new` or `/DEFAULT=current` | Also register the default-app entries, with that mode for `Neovim.TextFile`. |
+| `/DEFAULT=yes` | The checkbox: also offer both entries in the default-app lists. (`new` or `current` additionally name the mode of the generic `Neovim.TextFile` entry; `current` is the default.) |
 | `/NVIM=<nvim.exe>` | Use this Neovim instead of searching (`PATH`, official installer, winget, scoop). |
 | `/LOG=<file>` | Write what happened to a file. |
 

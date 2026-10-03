@@ -108,9 +108,7 @@ namespace OpenInNvimSetup
     {
         private readonly Args args;
         private readonly TextBox dirBox = new TextBox();
-        private readonly RadioButton none = new RadioButton();
-        private readonly RadioButton current = new RadioButton();
-        private readonly RadioButton fresh = new RadioButton();
+        private readonly CheckBox defaultApp = new CheckBox();
         private readonly Button install = new Button();
         public int ExitCode = 1;
 
@@ -158,22 +156,18 @@ namespace OpenInNvimSetup
             nvimLabel.SetBounds(16, 112, 488, 34);
             Controls.Add(nvimLabel);
 
-            GroupBox box = new GroupBox();
-            box.Text = "Default app for text files (Settings > Apps > Default apps)";
-            box.SetBounds(16, 150, 488, 96);
-            none.Text = "Do not register (context menu only)";
-            none.Checked = true;
-            none.SetBounds(14, 22, 440, 20);
-            fresh.Text = "Register \"new instance\" as an option";
-            fresh.SetBounds(14, 44, 440, 20);
-            current.Text = "Register \"current instance\" as an option";
-            current.SetBounds(14, 66, 440, 20);
-            box.Controls.Add(none);
-            box.Controls.Add(fresh);
-            box.Controls.Add(current);
-            Controls.Add(box);
-            if (a.DefaultMode == "new") { fresh.Checked = true; }
-            if (a.DefaultMode == "current") { current.Checked = true; }
+            // Windows does not let a program make itself the default; registering only adds Neovim to
+            // "Default apps" and "Open with" as a choice the user then picks per file type.
+            defaultApp.Text = "Also offer Neovim in Windows' \"Default apps\" and \"Open with\" lists";
+            defaultApp.SetBounds(16, 152, 488, 22);
+            defaultApp.Checked = a.DefaultMode != "";
+            Controls.Add(defaultApp);
+            Label defaultHint = new Label();
+            defaultHint.Text = "Adds two choices, \"Neovim (new instance)\" and \"Neovim (current instance)\"; you still pick one "
+                + "yourself per file type (Settings > Apps > Default apps). Nothing is switched for you. "
+                + "The context menu works either way.";
+            defaultHint.SetBounds(34, 176, 470, 66);
+            Controls.Add(defaultHint);
 
             install.Text = "Install";
             install.SetBounds(332, 258, 84, 30);
@@ -193,7 +187,7 @@ namespace OpenInNvimSetup
             install.Enabled = false;
             try
             {
-                string mode = fresh.Checked ? "new" : (current.Checked ? "current" : "");
+                string mode = defaultApp.Checked ? "current" : "";
                 InstallResult r = Installer.Install(args, dirBox.Text, mode, args.Nvim);
                 string msg = "Installed to " + r.Dir + ".\r\n\r\n"
                     + "Right-click a file or folder in Explorer. On Windows 11 the entries are under \"Show more options\".\r\n"
