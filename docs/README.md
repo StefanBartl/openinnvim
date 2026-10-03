@@ -24,8 +24,6 @@ is the short version of all of it.
 | [scope.md](scope.md) | What it does, what it deliberately does not, and its limits |
 | [architecture.md](architecture.md) | One compiled program, RPC over the default pipe, the trust check, and why a path is never command text |
 | [around-it.md](around-it.md) | How it fits next to Neovim's own `--remote`, filetree.nvim and your `init.lua` |
-| [ROADMAP.md](ROADMAP.md) | Roadmap |
-| [HANDOVER.md](HANDOVER.md) | Working notes and open items (German) |
 | [LIVE-TESTS.md](LIVE-TESTS.md) | Manual checklist for the real Explorer click (German) |
 | [REVIEW-2026-10-03.md](REVIEW-2026-10-03.md) | Review findings on the former VBS + PowerShell chain (German frame) |
 

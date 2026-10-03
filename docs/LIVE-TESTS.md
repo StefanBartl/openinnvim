@@ -9,7 +9,7 @@ Die Liste beschreibt den kompilierten Launcher. Die Fassung für die frühere VB
 PowerShell-Kette lag bis 2026-10-03 in der nvim-config (`docs/ROADMAP/Final_Checks/`).
 
 **Status:** ❌ ungetestet · 🟡 teilweise · ✅ wie erwartet · 🔴 Fehler (Notiz ausfüllen!).
-Ein gefundener Fehler gehört zusätzlich in [`ROADMAP.md`](ROADMAP.md) oder als GitHub-Issue.
+Ein gefundener Fehler gehört zusätzlich in `ROADMAP.md` im WKDBook `Development/wkdbook-openinnvim` oder als GitHub-Issue.
 
 ---
 
@@ -211,8 +211,8 @@ Nur wenn du Neovim als Standard-App für Dateitypen benutzt (`docs/FEATURES/DEFA
 
 ## Nach dem Durchlauf
 
-- Fehler nach [`ROADMAP.md`](ROADMAP.md) (Abschnitt 4) oder als GitHub-Issue, und in
-  [`HANDOVER.md`](HANDOVER.md) unter "Offen".
+- Fehler nach `ROADMAP.md` im WKDBook `Development/wkdbook-openinnvim` (Abschnitt 4) oder als GitHub-Issue, und in
+  `HANDOVER.md` im WKDBook `Development/wkdbook-openinnvim` unter "Offen".
 - Geänderte Einstellungen in `%LOCALAPPDATA%\OpenInNvim\open-in-nvim.ini` zurück auf den Standard.
 - Testordner löschen: `Remove-Item "$env:USERPROFILE\Desktop\oin-test" -Recurse`.
 - Der frühere Teil K (neotest-Listener) gehört nicht hierher; er steht im neotest-Handover der
