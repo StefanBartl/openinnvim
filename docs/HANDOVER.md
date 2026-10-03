@@ -132,7 +132,7 @@ nach den drei Fixes unten.
 | Review-Funde (Bug / Sicherheit / Performance), Docs-Standardisierung, PowerShell-5.1-Lehre | `.../openinnvim/Backlog/TASKS/2026-10-02_openinnvim-review.md` |
 | Installer, relative VBS, Fokus, **zweiter** Review | `.../openinnvim/Backlog/TASKS/2026-10-02_installer-fokus-zweiter-review.md` |
 | Live-Tests für dich | `docs/ROADMAP/Final_Checks/openinnvim-live-tests-2026-10-02.md` |
-| **Review-Fundstellen vom 2026-10-03 (31 Stück, ungeprüft)** | `docs/ROADMAP/reports/openinnvim-review-2026-10-03.md` |
+| **Review-Fundstellen vom 2026-10-03 (31 Stück, ungeprüft)** | [`REVIEW-2026-10-03.md`](REVIEW-2026-10-03.md) |
 | **Design des nativen Launchers, Paketplan mit Stand** | `WKDBooks/.../openinnvim/ROADMAP/native-launcher-design.md` |
 | Probe-Tool für neotest-Läufe mit der echten Config | `WKDBooks/.../TOOLS/neotest-run-probe.md`, `TOOLS/scripts/neotest-run-probe/` |
 | Installierte Binaries/VBS der Exe-Variante | `C:\Users\bartl\AppData\Local\OpenInNvim` (kein Repo, nicht angefasst) |
@@ -159,7 +159,7 @@ WKDBooks nach dem Abbruch: sauber); keine Streuprozesse.
 
 **Ergebnis von Phase 1:** 31 Fundstellen (12 Bugs, 10 Sicherheit, 9 Tempo) mit Behauptung, Beleg,
 Reproduktion und Fix-Vorschlag im Bericht
-`nvim-config/docs/ROADMAP/reports/openinnvim-review-2026-10-03.md` —
+[`REVIEW-2026-10-03.md`](REVIEW-2026-10-03.md) —
 **ungeprüft**, also Behauptungen je eines Reviewers. Die Testsuite lief bei zwei von drei Agenten
 **104/104 grün** (Windows PowerShell 5.1, 23 s); der dritte sah einen Abbruch bei 99/104, weil
 `Get-FileHash` fehlt, wenn PS 5.1 den `PSModulePath` eines pwsh-7-Elternprozesses erbt (B-F-06).
