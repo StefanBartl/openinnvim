@@ -42,7 +42,7 @@ modes can be picked side by side in *Default apps*, each with its own icon. For 
 `file-extensions.ps1`, and the `RegisteredApplications` entry.
 
 Run it after `install.ps1`: it looks for `OpenInNvim.exe` in `-LauncherDir` (default
-`%LOCALAPPDATA%\OpenInNvim`, then `<repo>bin`) and refuses to write anything when the launcher is
+`%LOCALAPPDATA%\OpenInNvim`, then `<repo>\bin`) and refuses to write anything when the launcher is
 missing, so no entry that opens nothing can appear. `uninstall.ps1` removes what it wrote.
 
 ## Checking the registration
