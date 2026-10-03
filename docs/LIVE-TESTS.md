@@ -203,7 +203,7 @@ Nur wenn du Neovim als Standard-App für Dateitypen benutzt (`docs/FEATURES/DEFA
 
 | # | Was testen | Erwartung | Status | Notizen |
 | --- | --- | --- | --- | --- |
-| I1 | Doppelklick auf eine Datei, die `Neovim.TextFile*` zugeordnet ist | Öffnet über `OpenInNvim.exe` (die drei ProgIDs wurden am 2026-10-03 von Hand auf die exe umgestellt) | ❌ | |
+| I1 | Doppelklick auf eine Datei, die `Neovim.TextFile*` zugeordnet ist | Öffnet über `OpenInNvim.exe` (`register-nvim-default-app.ps1` schreibt `Neovim.TextFile`, `install-icons-for-progids.ps1` schreibt `.New`/`.Current` samt open-Kommando) | ❌ | |
 | I2 | Einstellungen → Apps → Standard-Apps | "Neovim (new instance)" / "(current instance)" mit Namen; Icon generisch (die exe hat kein eingebettetes Icon: bekannte Lücke) | ❌ | |
 | I3 | `register-nvim-default-app.ps1` | Fragt nach Modus, schreibt das ProgID auf die exe | ❌ | |
 

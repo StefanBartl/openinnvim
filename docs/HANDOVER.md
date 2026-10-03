@@ -96,13 +96,19 @@ nach den drei Fixes unten.
       (am 2026-10-03; die meisten Punkte sind noch ungetestet).
 - [ ] WKDBook: `openinnvim/ROADMAP/ROADMAP.md` und Backlog an den neuen Stand anpassen.
 - [ ] Beim Docs-Abgleich gefunden, noch offen: Chooser-Label ohne Startzeit; Fokus für eine reine
-      Konsole (`AttachConsole` aus dem Design fehlt); `install-icons-for-progids.ps1` ist verwaist
-      (nichts schreibt mehr das open-Kommando von `Neovim.TextFile.New`/`.Current`);
-      `uninstall.ps1` entfernt die Standard-App-Registrierung nicht; `install.ps1 -Force` übernimmt
-      die Werte einer alten `open-in-nvim.config.ps1` nicht und löscht sie trotzdem; in-place-Install
-      schreibt kein Manifest; `.gitignore` hat noch `obj/`, `publish/`, `*.user`; die exe hat kein
-      eingebettetes Icon. Behoben in `7cdc4af`: `NVIM_BIN` wurde relativ zum angeklickten Ordner
-      geprüft, Fokus lief zweimal je Klick.
+      Konsole (`AttachConsole` aus dem Design fehlt); in-place-Install schreibt kein Manifest;
+      `.gitignore` hat noch `obj/`, `publish/`, `*.user`; die exe hat kein eingebettetes Icon.
+      Behoben in `7cdc4af`: `NVIM_BIN` wurde relativ zum angeklickten Ordner geprüft, Fokus lief
+      zweimal je Klick. Behoben im Review vom 2026-10-03 (`121394a`, `7501f2a`): lange Pfade als
+      "neue Datei", `WEZTERM_BIN` relativ zum Klickordner, `uninstall.ps1` ließ die
+      Standard-App-Registrierung stehen, `install.ps1 -Force` verlor die Werte der alten Config.
+      Danach: `install-icons-for-progids.ps1` schreibt jetzt selbst das open-Kommando und die
+      Dateitypen für `Neovim.TextFile.New`/`.Current` (war verwaist).
+- Bewusst so gelassen (geprüft 2026-10-03): `SHChangeNotify` mit `SHCNF_FLUSH` (stellt sicher, dass
+  ein Klick direkt nach dem Install schon den neuen Befehl trifft); der vorhersagbare Pipe-Name
+  (`ConnectTrusted` prüft Server-PID, Session und SID vor dem ersten Schreiben); drei Randfälle im
+  Launcher (relativer nicht normalisierbarer Pfad, `;` in einem gequoteten PATH-Eintrag, sehr
+  langes Arbeitsverzeichnis bei `TERMINAL=console`).
 - [ ] Optional: Benutzer-Variable `NVIM_VBS` löschen; Ordner `_nicht-mehr-gebraucht` löschen.
 - [ ] Kleinere bekannte Lücken stehen in `E:\repos\openinnvim\docs\ROADMAP.md`, Abschnitt 4
       (Kommandozeilenfenster `q:`, Prompt zwischen Probe und Anfrage, zwei Icons, WezTerm-Fenster).

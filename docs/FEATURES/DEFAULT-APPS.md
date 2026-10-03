@@ -35,10 +35,15 @@ A double-click then behaves exactly like the context-menu entry of the same mode
 
 ## `install-icons-for-progids.ps1`
 
-Writes `DefaultIcon` (from `Logos\`), a display name, minimal `Capabilities` and a
-`RegisteredApplications` entry for two further ProgIDs, `Neovim.TextFile.New` and
-`Neovim.TextFile.Current`. It writes no open command for them, and no other script in
-the repository does; on its own it registers names and icons only.
+Registers two further ProgIDs, `Neovim.TextFile.New` and `Neovim.TextFile.Current`, so both
+modes can be picked side by side in *Default apps*, each with its own icon. For each it writes
+`DefaultIcon` (from `Logos\`), a display name, the open command
+(`"<dir>\OpenInNvim.exe" new "%1"` / `... current "%1"`), `Capabilities` with the file types of
+`file-extensions.ps1`, and the `RegisteredApplications` entry.
+
+Run it after `install.ps1`: it looks for `OpenInNvim.exe` in `-LauncherDir` (default
+`%LOCALAPPDATA%\OpenInNvim`, then `<repo>bin`) and refuses to write anything when the launcher is
+missing, so no entry that opens nothing can appear. `uninstall.ps1` removes what it wrote.
 
 ## Checking the registration
 
