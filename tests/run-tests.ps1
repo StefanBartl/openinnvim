@@ -149,7 +149,13 @@ function Remove-OwnTree {
 $runStart = (Get-Date).AddSeconds(-2)
 $tag = [Guid]::NewGuid().ToString('N').Substring(0, 8)
 # A space in the folder name: every path of the run has to survive quoting.
-$tmp = Join-Path $env:TEMP ('oin native ' + $tag)
+# %TEMP% may hold an 8.3 short name (C:\Users\RUNNER~1 on a CI runner); the launcher and Neovim report the
+# long form, so every expected path is built from the long form too.
+Add-Type -Namespace OinTest -Name Long -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] public static extern uint GetLongPathNameW(string s, System.Text.StringBuilder b, uint n);'
+$tempLong = $env:TEMP
+$sbLong = New-Object System.Text.StringBuilder 1024
+if ([OinTest.Long]::GetLongPathNameW($env:TEMP, $sbLong, 1024) -gt 0) { $tempLong = $sbLong.ToString() }
+$tmp = Join-Path $tempLong ('oin native ' + $tag)
 [void][IO.Directory]::CreateDirectory($tmp)
 $bin = Join-Path $tmp 'bin dir'
 $exe = Join-Path $bin 'OpenInNvim.exe'
