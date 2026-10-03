@@ -3,7 +3,13 @@
 # English comments are used throughout as requested.
 
 param(
-    [string]$InstallPath = (Join-Path $env:LOCALAPPDATA 'OpenInNvim')
+    [string]$InstallPath = (Join-Path $env:LOCALAPPDATA 'OpenInNvim'),
+    # 'new' or 'current': skips the question. Empty: ask.
+    [ValidateSet('', 'new', 'current')]
+    [string]$Mode = '',
+    # Registry keys below HKCU. Only tests change them.
+    [string]$ClassesKey = 'Software\Classes',
+    [string]$SoftwareKey = 'Software'
 )
 
 # Stop on first error to avoid partial registry changes.
@@ -17,8 +23,7 @@ if ([string]::IsNullOrWhiteSpace($InstallPath)) {
 }
 
 # --- USER PROMPT FOR MODE ---
-$Mode = ''
-while ($true) {
+while ($Mode -eq '') {
     Clear-Host
 
     # Present options to the user
@@ -65,7 +70,7 @@ Write-Host "`nRegistering Neovim as a default application..."
 Write-Host "Selected mode: $appName"
 
 # 1) Create/update ProgID
-$progIdPath = "HKCU:\Software\Classes\$progId"
+$progIdPath = "HKCU:\$ClassesKey\$progId"
 New-Item -Path $progIdPath -Force | Out-Null
 New-ItemProperty -Path $progIdPath -Name '(default)' -Value $appName -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $progIdPath -Name 'FriendlyAppName' -Value $appName -PropertyType String -Force | Out-Null
@@ -81,7 +86,7 @@ New-Item -Path $commandPath -Force | Out-Null
 New-ItemProperty -Path $commandPath -Name '(default)' -Value $command -PropertyType String -Force | Out-Null
 
 # 4) Registered app capabilities for Default Apps UI
-$capabilitiesPath = "HKCU:\Software\$progId\Capabilities"
+$capabilitiesPath = "HKCU:\$SoftwareKey\$progId\Capabilities"
 New-Item -Path $capabilitiesPath -Force | Out-Null
 New-ItemProperty -Path $capabilitiesPath -Name 'ApplicationName' -Value $appName -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $capabilitiesPath -Name 'ApplicationDescription' -Value "Text editor based on Neovim" -PropertyType String -Force | Out-Null
@@ -101,11 +106,15 @@ foreach ($ext in $extensions) {
 }
 
 # 6) Register in RegisteredApplications so Windows shows it in Settings -> Default apps
-$regAppsPath = "HKCU:\Software\RegisteredApplications"
-if (-not (Test-Path $regAppsPath)) {
+$regAppsPath = "HKCU:\$SoftwareKey\RegisteredApplications"
+if (-not (Test-Path -LiteralPath $regAppsPath)) {
     New-Item -Path $regAppsPath -Force | Out-Null
 }
-New-ItemProperty -Path $regAppsPath -Name $progId -Value "Software\$progId\Capabilities" -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $regAppsPath -Name $progId -Value "$SoftwareKey\$progId\Capabilities" -PropertyType String -Force | Out-Null
+
+# Explorer and Settings keep the old registrations until told (not for a throw-away test key).
+. (Join-Path $scriptDir 'shell-notify.ps1')
+Send-AssocChanged -Skip:(($ClassesKey -ne 'Software\Classes') -or ($SoftwareKey -ne 'Software'))
 
 Write-Host "`nRegistration finished!" -ForegroundColor Green
 Write-Host "`nNext steps:"

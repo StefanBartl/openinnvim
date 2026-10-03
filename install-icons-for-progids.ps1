@@ -10,7 +10,10 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-icons-for-progids.ps1
 #
 param(
-    [string]$InstallPath = $PSScriptRoot
+    [string]$InstallPath = $PSScriptRoot,
+    # Registry keys below HKCU. Only tests change them.
+    [string]$ClassesKey = 'Software\Classes',
+    [string]$SoftwareKey = 'Software'
 )
 
 # English comments inside code as requested.
@@ -57,7 +60,7 @@ function Set-ProgIdIconAndMetadata {
     )
 
     # Create ProgID key under HKCU per-user
-    $progIdKey = "HKCU:\Software\Classes\$ProgId"
+    $progIdKey = "HKCU:\$ClassesKey\$ProgId"
     New-Item -Path $progIdKey -Force | Out-Null
 
     # Set friendly display name and default value
@@ -70,7 +73,7 @@ function Set-ProgIdIconAndMetadata {
     New-ItemProperty -Path $iconKey -Name '(default)' -Value $IconFullPath -PropertyType String -Force | Out-Null
 
     # Minimal Capabilities so the RegisteredApplications entry can point to something sane
-    $capPath = "HKCU:\Software\$ProgId\Capabilities"
+    $capPath = "HKCU:\$SoftwareKey\$ProgId\Capabilities"
     New-Item -Path $capPath -Force | Out-Null
     New-ItemProperty -Path $capPath -Name 'ApplicationName' -Value $DisplayName -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $capPath -Name 'ApplicationDescription' -Value 'Text editor based on Neovim' -PropertyType String -Force | Out-Null
@@ -80,11 +83,11 @@ function Set-ProgIdIconAndMetadata {
     New-Item -Path $fileAssoc -Force | Out-Null
 
     # Register ProgId in RegisteredApplications so it appears in Settings -> Default apps list
-    $regAppsKey = 'HKCU:\Software\RegisteredApplications'
-    if (-not (Test-Path $regAppsKey)) {
+    $regAppsKey = "HKCU:\$SoftwareKey\RegisteredApplications"
+    if (-not (Test-Path -LiteralPath $regAppsKey)) {
         New-Item -Path $regAppsKey -Force | Out-Null
     }
-    New-ItemProperty -Path $regAppsKey -Name $ProgId -Value "Software\$ProgId\Capabilities" -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $regAppsKey -Name $ProgId -Value "$SoftwareKey\$ProgId\Capabilities" -PropertyType String -Force | Out-Null
 }
 
 # Set for both ProgIDs

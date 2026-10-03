@@ -1,5 +1,6 @@
 # uninstall.ps1
-# Removes the context-menu entries written by install.ps1 (under HKCU) and, with -RemoveFiles, the files it
+# Removes the context-menu entries written by install.ps1 and the default-app registrations of
+# register-nvim-default-app.ps1 / install-icons-for-progids.ps1 (all under HKCU) and, with -RemoveFiles, the files it
 # put there. File removal follows the manifest in the install folder, never a recursive delete, and never
 # touches a folder that is the repository itself.
 #
@@ -10,7 +11,9 @@
 
 param(
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'OpenInNvim'),
+  # Registry keys below HKCU. Only tests change them.
   [string]$ClassesKey = 'Software\Classes',
+  [string]$SoftwareKey = 'Software',
   # Also delete the files listed in the manifest.
   [switch]$RemoveFiles,
   # Also delete the config file (it is yours: kept unless you ask).
@@ -55,14 +58,34 @@ foreach ($p in $paths) {
 }
 Write-Host "Context-menu entries removed: $removed"
 
-# Explorer keeps the old commands in memory until it is told that associations changed; without this a
-# click right after the (un)install still runs the previous command.
-if (-not $DryRun) {
-  try {
-    Add-Type -Namespace OpenInNvimSetup -Name Shell -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll")] public static extern void SHChangeNotify(int wEventId, uint uFlags, System.IntPtr dwItem1, System.IntPtr dwItem2);'
-    [OpenInNvimSetup.Shell]::SHChangeNotify(0x08000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)   # SHCNE_ASSOCCHANGED, SHCNF_FLUSH
-  } catch { Write-Warning "Could not notify Explorer; restart it if the menu still runs the old command." }
+# The default-app registrations of register-nvim-default-app.ps1 and install-icons-for-progids.ps1: the
+# ProgIDs, their Capabilities and the RegisteredApplications values. Only these names, nothing else.
+$progIds = @('Neovim.TextFile', 'Neovim.TextFile.New', 'Neovim.TextFile.Current')
+$regApps = "$SoftwareKey\RegisteredApplications"
+$removedProgIds = 0
+foreach ($id in $progIds) {
+  foreach ($key in @("$ClassesKey\$id", "$SoftwareKey\$id")) {
+    if (Test-RegKey $key) {
+      Write-Step "Remove HKCU\$key"
+      if (-not $DryRun) { $hkcu.DeleteSubKeyTree($key, $false) }
+      $removedProgIds++
+    }
+  }
+  $ra = $hkcu.OpenSubKey($regApps, $true)
+  if ($ra) {
+    try {
+      if ($null -ne $ra.GetValue($id)) {
+        Write-Step "Remove HKCU\$regApps value $id"
+        if (-not $DryRun) { $ra.DeleteValue($id, $false) }
+        $removedProgIds++
+      }
+    } finally { $ra.Close() }
+  }
 }
+Write-Host "Default-app registrations removed: $removedProgIds"
+
+. (Join-Path $Source 'shell-notify.ps1')
+if (-not $DryRun) { Send-AssocChanged -Skip:($ClassesKey -ne 'Software\Classes') }
 
 if ($RemoveFiles) {
   $manifest = Join-Path $InstallDir 'install.manifest.txt'

@@ -1205,7 +1205,25 @@ return true
     if (-not $k) { return $null }
     try { return [string]$k.GetValue('') } finally { $k.Close() }
   }
+  # The default-app registrations (Capabilities, RegisteredApplications) live outside Classes: a second
+  # throw-away key stands in for HKCU\Software. Nothing below touches the real registry.
+  $swKey = $regKey + '_sw'
+  function Get-RegValue {
+    param([string]$Sub, [string]$Name = '')
+    $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Sub)
+    if (-not $k) { return $null }
+    try { return $k.GetValue($Name) } finally { $k.Close() }
+  }
+  function Set-RegValue {
+    param([string]$Sub, [string]$Name, [string]$Value)
+    $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($Sub)
+    try { $k.SetValue($Name, $Value) } finally { $k.Close() }
+  }
   try {
+    # Somebody else's entries next to ours: no script may touch them.
+    Set-RegValue ($regKey + '\*\shell\Foreign_Verb\command') '' 'foreign.exe "%1"'
+    Set-RegValue ($regKey + '\Neovim.TextFile.Other') '' 'foreign progid'
+    Set-RegValue ($swKey + '\RegisteredApplications') 'Foreign.App' 'Software\Foreign\Capabilities'
     $res = Invoke-Script 'install.ps1' ('-InstallDir "' + $instDir + '" -ClassesKey "' + $regKey + '" -NvimExe "' + $nvim + '"')
     $instExe = Join-Path $instDir 'OpenInNvim.exe'
     Assert-That 'install: exit 0, exe built, ini and manifest written' (($res.Code -eq 0) -and [IO.File]::Exists($instExe) -and [IO.File]::Exists((Join-Path $instDir 'open-in-nvim.ini')) -and [IO.File]::Exists((Join-Path $instDir 'install.manifest.txt'))) ("out=" + $res.Text)
@@ -1227,6 +1245,13 @@ return true
     $res = Invoke-Script 'install.ps1' ('-InstallDir "' + $oldDir + '" -ClassesKey "' + $regKey + '" -NvimExe "' + $nvim + '"')
     $iniLines = @([IO.File]::ReadAllLines((Join-Path $oldDir 'open-in-nvim.ini')))
     Assert-That 'install over the old version: old files removed, config converted' (($res.Code -eq 0) -and (-not [IO.File]::Exists((Join-Path $oldDir 'open-in-nvim.vbs'))) -and (-not [IO.File]::Exists((Join-Path $oldDir 'open-in-nvim.config.ps1'))) -and ($iniLines -contains 'INSTANCE_PICK = oldest') -and ($iniLines -contains 'FOCUS_TERMINAL = true') -and ($iniLines -contains ('NVIM_BIN = ' + $nvim))) ("ini=" + ($iniLines -join ' / '))
+    # -Force replaces an existing ini, but must still carry the values of the old config over before it deletes that file.
+    $forceDir = [string](Join-Path $tmp 'force inst'); [void][IO.Directory]::CreateDirectory($forceDir)
+    [IO.File]::WriteAllText((Join-Path $forceDir 'open-in-nvim.ini'), "INSTANCE_PICK = newest`r`n")
+    [IO.File]::WriteAllText((Join-Path $forceDir 'open-in-nvim.config.ps1'), "`$Cfg = [ordered]@{ INSTANCE_PICK = 'oldest' }")
+    $res = Invoke-Script 'install.ps1' ('-InstallDir "' + $forceDir + '" -ClassesKey "' + $regKey + '" -NvimExe "' + $nvim + '" -Force')
+    $forceIni = @([IO.File]::ReadAllLines((Join-Path $forceDir 'open-in-nvim.ini')))
+    Assert-That 'install -Force with an old config next to it: its values are carried over, not lost' (($res.Code -eq 0) -and ($forceIni -contains 'INSTANCE_PICK = oldest') -and (-not [IO.File]::Exists((Join-Path $forceDir 'open-in-nvim.config.ps1')))) ("ini=" + ($forceIni -join ' / '))
     $res = Invoke-Script 'install.ps1' ('-InstallDir "' + (Join-Path $tmp 'dry') + '" -ClassesKey "' + $regKey + '_dry" -NvimExe "' + $nvim + '" -DryRun')
     Assert-That 'install -DryRun: nothing written' (($res.Code -eq 0) -and (-not [IO.Directory]::Exists((Join-Path $tmp 'dry'))) -and ($null -eq [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($regKey + '_dry')))
     $res = Invoke-Script 'uninstall.ps1' ('-InstallDir "' + $instDir + '" -ClassesKey "' + $regKey + '" -RemoveFiles')
@@ -1235,9 +1260,34 @@ return true
     $res = Invoke-Script 'install.ps1' ('-InstallDir "' + $instDir + '" -ClassesKey "' + $regKey + '" -NvimExe "' + $nvim + '"')
     $run = Invoke-Bounded -Exe $instExe -ArgLine ('current "' + $target + '"') -Env @{ OPEN_IN_NVIM_ONLY_PIDS = $editors; OPEN_IN_NVIM_NO_SPAWN = '1'; OPEN_IN_NVIM_NO_UI = '1'; USERNAME = $fakeUser; OPEN_IN_NVIM_DRYRUN = '1' } -Cwd $tmp
     Assert-That 'the installed exe runs (dry run lists candidates)' (($run.Code -eq 0) -and (@($run.Lines | Where-Object { $_ -like 'candidate: *' }).Count -ge 1)) ("out=" + $run.Text)
+
+    # Default-app registration (ProgID + Capabilities + RegisteredApplications), then uninstall.
+    $scratch = '-ClassesKey "' + $regKey + '" -SoftwareKey "' + $swKey + '"'
+    $res = Invoke-Script 'register-nvim-default-app.ps1' ('-InstallPath "' + $instDir + '" -Mode current ' + $scratch)
+    $progCmd = Get-RegValue ($regKey + '\Neovim.TextFile\shell\open\command')
+    Assert-That 'register: the ProgID opens "exe" mode "%1" by its full quoted path' (($res.Code -eq 0) -and ($progCmd -eq ('"' + $instExe + '" current "%1"'))) ("code=$($res.Code) cmd=$progCmd err=" + $res.Err)
+    Assert-That 'register: .txt and .lua map to the ProgID, RegisteredApplications points at the Capabilities' (((Get-RegValue ($swKey + '\Neovim.TextFile\Capabilities\FileAssociations') '.txt') -eq 'Neovim.TextFile') -and ((Get-RegValue ($swKey + '\Neovim.TextFile\Capabilities\FileAssociations') '.lua') -eq 'Neovim.TextFile') -and ((Get-RegValue ($swKey + '\RegisteredApplications') 'Neovim.TextFile') -eq ($swKey + '\Neovim.TextFile\Capabilities')))
+    $res = Invoke-Script 'register-nvim-default-app.ps1' ('-InstallPath "' + $instDir + '" -Mode new ' + $scratch)
+    $progCmd = Get-RegValue ($regKey + '\Neovim.TextFile\shell\open\command')
+    Assert-That 'register again with the other mode: same keys, the command follows' (($res.Code -eq 0) -and ($progCmd -eq ('"' + $instExe + '" new "%1"')) -and ((Get-RegValue ($swKey + '\Neovim.TextFile\Capabilities') 'ApplicationName') -eq 'Neovim (new instance)'))
+    $res = Invoke-Script 'install-icons-for-progids.ps1' ('-InstallPath "' + $Root + '" ' + $scratch)
+    Assert-That 'icons: both ProgIDs get a DefaultIcon and a RegisteredApplications value' (($res.Code -eq 0) -and ((Get-RegValue ($regKey + '\Neovim.TextFile.New\DefaultIcon')) -like '*new-session.ico') -and ((Get-RegValue ($regKey + '\Neovim.TextFile.Current\DefaultIcon')) -like '*current-session.ico') -and ((Get-RegValue ($swKey + '\RegisteredApplications') 'Neovim.TextFile.Current') -eq ($swKey + '\Neovim.TextFile.Current\Capabilities'))) ("out=" + $res.Text + $res.Err)
+    $res = Invoke-Script 'uninstall.ps1' ('-InstallDir "' + $instDir + '" -DryRun ' + $scratch)
+    Assert-That 'uninstall -DryRun: nothing removed' (($res.Code -eq 0) -and ($null -ne (Get-RegValue ($regKey + '\Neovim.TextFile\shell\open\command'))) -and ($null -ne (Get-Command-Value 'Directory\shell\Open_in_Neovim_new')))
+    $res = Invoke-Script 'uninstall.ps1' ('-InstallDir "' + $instDir + '" ' + $scratch)
+    $leftover = @()
+    foreach ($id in 'Neovim.TextFile', 'Neovim.TextFile.New', 'Neovim.TextFile.Current') {
+      if ($null -ne [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($regKey + '\' + $id)) { $leftover += ('classes ' + $id) }
+      if ($null -ne [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($swKey + '\' + $id)) { $leftover += ('software ' + $id) }
+      if ($null -ne (Get-RegValue ($swKey + '\RegisteredApplications') $id)) { $leftover += ('registered ' + $id) }
+    }
+    Assert-That 'uninstall: the default-app registrations are gone (ProgIDs, Capabilities, RegisteredApplications values)' (($res.Code -eq 0) -and ($leftover.Count -eq 0)) ("left=" + ($leftover -join ', ') + " out=" + $res.Text)
+    Assert-That 'uninstall: the context-menu entries are gone too' (($null -eq (Get-Command-Value '*\shell\Open_in_Neovim_new')) -and ($null -eq (Get-Command-Value 'Directory\Background\shell\Open_in_Neovim_current')))
+    Assert-That 'install + register + uninstall never touch foreign entries (verb, ProgID of a similar name, RegisteredApplications value)' (((Get-Command-Value '*\shell\Foreign_Verb') -eq 'foreign.exe "%1"') -and ((Get-RegValue ($regKey + '\Neovim.TextFile.Other')) -eq 'foreign progid') -and ((Get-RegValue ($swKey + '\RegisteredApplications') 'Foreign.App') -eq 'Software\Foreign\Capabilities'))
   }
   finally {
     try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($regKey, $false) } catch {}
+    try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($swKey, $false) } catch {}
   }
 
   # -------------------------------------------------------------------------------------------

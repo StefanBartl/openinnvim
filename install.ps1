@@ -89,7 +89,7 @@ function Set-IniValue {
 # ---------------------------------------------------------------------------------------------
 # 1) Check the source
 # ---------------------------------------------------------------------------------------------
-foreach ($f in @('build.ps1', $ConfigFile)) {
+foreach ($f in @('build.ps1', 'shell-notify.ps1', $ConfigFile)) {
   if (-not (Test-Path -LiteralPath (Join-Path $Source $f))) { throw "Required file missing: $(Join-Path $Source $f)" }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $Source 'src'))) { throw "Required folder missing: $(Join-Path $Source 'src')" }
@@ -127,7 +127,8 @@ if ((Test-Path -LiteralPath $destConfig) -and -not $Force) {
   Write-Step "Write config $destConfig"
   if (-not $DryRun) {
     $text = [IO.File]::ReadAllText((Join-Path $Source $ConfigFile))
-    if ((Test-Path -LiteralPath $oldConfigPath) -and -not $Force) {
+    # Also with -Force: the old file is deleted below, so its values must not be thrown away unread.
+    if (Test-Path -LiteralPath $oldConfigPath) {
       # The old config is a PowerShell file that defines $Cfg; its values carry over.
       $Cfg = $null
       try { . $oldConfigPath } catch { Write-Warning "Old config not readable, defaults used: $($_.Exception.Message)" }
@@ -201,14 +202,8 @@ foreach ($t in $targets) {
   }
 }
 
-# Explorer keeps the old commands in memory until it is told that associations changed; without this a
-# click right after the (un)install still runs the previous command.
-if (-not $DryRun) {
-  try {
-    Add-Type -Namespace OpenInNvimSetup -Name Shell -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll")] public static extern void SHChangeNotify(int wEventId, uint uFlags, System.IntPtr dwItem1, System.IntPtr dwItem2);'
-    [OpenInNvimSetup.Shell]::SHChangeNotify(0x08000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)   # SHCNE_ASSOCCHANGED, SHCNF_FLUSH
-  } catch { Write-Warning "Could not notify Explorer; restart it if the menu still runs the old command." }
-}
+. (Join-Path $Source 'shell-notify.ps1')
+if (-not $DryRun) { Send-AssocChanged -Skip:($ClassesKey -ne 'Software\Classes') }
 
 Write-Host ''
 if ($DryRun) { Write-Host 'Dry run, nothing was changed. Would install:' } else { Write-Host 'Installed:' }
