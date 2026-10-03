@@ -8,6 +8,8 @@ on:
   push:
     tags:
       - 'v*'
+  # A manual run builds and tests only (no release): to try the workflow without a tag.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,6 +21,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: powershell
         run: |
           $v = (Get-Content VERSION -Raw).Trim()
@@ -28,8 +31,10 @@ jobs:
         shell: powershell
         run: |
           choco install neovim --no-progress -y
-          $nvim = 'C:\Program Files\Neovim\bin\nvim.exe'
-          if (-not (Test-Path $nvim)) { throw "nvim.exe not found at $nvim" }
+          # The package unpacks to C:\tools\neovim\nvim-win64 (not Program Files); the tests read NVIM_EXE.
+          $nvim = Get-ChildItem 'C:\tools\neovim' -Recurse -Filter nvim.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $nvim) { throw 'nvim.exe not found under C:\tools\neovim' }
+          "NVIM_EXE=$nvim" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           & $nvim --version | Select-Object -First 1
 
       - name: Tests
@@ -41,6 +46,7 @@ jobs:
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-setup.ps1
 
       - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
