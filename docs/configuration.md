@@ -32,7 +32,7 @@ FOCUS_TERMINAL = false
 | --- | --- | --- | --- |
 | `NVIM_BIN` | `nvim` (looked up on `PATH`) | both | Path of `nvim.exe`. If the file does not exist, `nvim` from `PATH` is used. `install.ps1` writes the path it found. |
 | `TERMINAL` | `auto` | both | Where a new instance is shown: `auto`, `wezterm`, `wt` or `console`. |
-| `WEZTERM_BIN` | empty | both | Path of `wezterm-gui.exe` when it is not on `PATH`. |
+| `WEZTERM_BIN` | empty | both | Full path of `wezterm-gui.exe` when it is not on `PATH`. A bare name is looked up on `PATH`; a relative path is ignored (the clicked folder is never searched). |
 | `NVIM_SERVER` | empty | current | A fixed server tried first: a pipe name or `host:port`. Empty: running instances are found automatically. |
 | `PREFER_STABLE_PIPE` | `true` | current | The instance that serves `\\.\pipe\nvim-%USERNAME%` goes first. |
 | `INSTANCE_PICK` | `newest` | current | Which running instance goes first: `newest`, `oldest` or `ask`. |

@@ -1121,6 +1121,38 @@ return true
   Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = $wezCfg }
   $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA })))
   Assert-That 'WEZTERM_BIN from the config wins over PATH' (($via.Count -ge 1) -and ($via[0] -like ('wezterm ' + $wezCfg + ' *'))) ("via=" + ($via -join ' / '))
+  # A relative WEZTERM_BIN must never be looked up in the clicked folder (the launcher's working directory).
+  $plantDir = [string](Join-Path $tmp 'planted'); [void][IO.Directory]::CreateDirectory($plantDir)
+  [IO.File]::WriteAllBytes((Join-Path $plantDir 'planted-wez.exe'), [byte[]]@())
+  [void][IO.Directory]::CreateDirectory((Join-Path $plantDir 'sub')); [IO.File]::WriteAllBytes((Join-Path $plantDir 'sub\planted-wez.exe'), [byte[]]@())
+  Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = 'planted-wez.exe' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA }) $plantDir))
+  Assert-That 'WEZTERM_BIN = bare name: a program of that name in the clicked folder is never used' ((@($via | Where-Object { $_ -like 'wezterm *' }).Count -eq 0) -and ($via.Count -eq 1) -and ($via[0] -like 'console *')) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = 'sub\planted-wez.exe' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $pathA }) $plantDir))
+  Assert-That 'WEZTERM_BIN = relative path: not resolved against the clicked folder either' ((@($via | Where-Object { $_ -like 'wezterm *' }).Count -eq 0) -and ($via[0] -like 'console *')) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim; WEZTERM_BIN = 'wezterm-gui.exe' }
+  $via = @(Get-Via (Invoke-Oin ('new "' + $target + '"') ($spawnEnv + @{ PATH = $termDir }) $plantDir))
+  Assert-That 'WEZTERM_BIN = bare name is looked up on PATH' (($via.Count -ge 1) -and ($via[0] -eq ('wezterm ' + (Join-Path $termDir 'wezterm-gui.exe') + ' "start" "--cwd" "' + $tmp + '" "--" "' + $nvim + '" "--" "' + $target + '"'))) ("via=" + ($via -join ' / '))
+  Set-Ini @{ NVIM_BIN = $nvim }
+
+  Write-Host '== long paths (the exe is built without a TargetFrameworkAttribute: .NET 4.0 path rules)'
+  $longBase = [string](Join-Path $tmp 'long'); $longDir = $longBase
+  for ($li = 0; $li -lt 6; $li++) { $longDir = $longDir + '\' + ('d' * 50) }
+  try {
+    [void][IO.Directory]::CreateDirectory('\\?\' + $longDir)
+    $longFile = $longDir + '\long file.txt'
+    [IO.File]::WriteAllText('\\?\' + $longFile, 'x')
+    $dry = @{ OPEN_IN_NVIM_DRYRUN = '1' }
+    $res = Invoke-Oin ('current "' + $longFile + '"') $dry
+    Assert-That 'an existing file with a path over 259 characters is a file, its folder the working directory' (($res.Code -eq 0) -and ($res.Lines -contains ('target: file ' + $longFile)) -and ($res.Lines -contains ('cwd: ' + $longDir))) ("out=" + ($res.Lines -join ' / '))
+    $res = Invoke-Oin ('current "' + $longDir + '\"') $dry
+    Assert-That 'an existing folder with a path over 259 characters is a folder (trailing separator removed)' (($res.Code -eq 0) -and ($res.Lines -contains ('target: folder ' + $longDir)) -and ($res.Lines -contains ('cwd: ' + $longDir))) ("out=" + ($res.Lines -join ' / '))
+    $res = Invoke-Oin ('current "' + $longDir + '\missing.txt"') $dry
+    Assert-That 'a missing file in a long folder is a new file there' (($res.Code -eq 0) -and ($res.Lines -contains ('target: newfile ' + $longDir + '\missing.txt')) -and ($res.Lines -contains ('cwd: ' + $longDir))) ("out=" + ($res.Lines -join ' / '))
+  } finally {
+    try { [IO.Directory]::Delete('\\?\' + $longBase, $true) } catch { Write-Host ('  (could not remove ' + $longBase + ': ' + $_.Exception.Message + ')') }
+  }
 
   Assert-That 'PATH merge: inherited entries first, missing registry entries appended once' ([OpenInNvim.Spawner]::MergePath('C:\a;C:\b\', 'c:\B;C:\c;;C:\a') -eq 'C:\a;C:\b\;C:\c')
   Set-Ini @{ NVIM_BIN = $nvim }

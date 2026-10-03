@@ -48,6 +48,9 @@ namespace OpenInNvim
         internal static extern IntPtr FindFirstFileW(string lpFileName, IntPtr lpFindFileData);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern uint GetFileAttributesW(string lpFileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool FindNextFileW(IntPtr hFindFile, IntPtr lpFindFileData);
 

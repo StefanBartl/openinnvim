@@ -251,7 +251,22 @@ namespace OpenInNvim
         {
             try
             {
-                if (!string.IsNullOrEmpty(cfg.WeztermBin) && File.Exists(cfg.WeztermBin)) { return Path.GetFullPath(cfg.WeztermBin); }
+                // Same rule as NVIM_BIN: only a rooted path is taken as a file (a relative one would be
+                // looked up in the clicked folder, and a program lying there would be started), and a bare
+                // name is looked up on PATH.
+                string bin = cfg.WeztermBin;
+                if (!string.IsNullOrEmpty(bin))
+                {
+                    if (Path.IsPathRooted(bin))
+                    {
+                        if (File.Exists(bin)) { return Path.GetFullPath(bin); }
+                    }
+                    else if (bin.IndexOfAny(new char[] { '\\', '/', ':' }) < 0)
+                    {
+                        string named = CommandLine.FindOnPath(bin, pathVariable);
+                        if (named != null) { return named; }
+                    }
+                }
             }
             catch (Exception) { }
             string gui = CommandLine.FindOnPath("wezterm-gui", pathVariable);
