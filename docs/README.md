@@ -25,6 +25,7 @@ is the short version of all of it.
 | [architecture.md](architecture.md) | One compiled program, RPC over the default pipe, the trust check, and why a path is never command text |
 | [around-it.md](around-it.md) | How it fits next to Neovim's own `--remote`, filetree.nvim and your `init.lua` |
 | [ROADMAP.md](ROADMAP.md) | Roadmap |
+| [HANDOVER.md](HANDOVER.md) | Working notes and open items (German) |
 
 ## Working on it
 
